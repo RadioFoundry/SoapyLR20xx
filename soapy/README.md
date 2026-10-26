@@ -125,8 +125,16 @@ Then `serial=/dev/ttyACM0`.
 
 ## Tested
 
-On macOS against `tools/fake_bridge/` (`ctest -R soapy_fake_bridge`): discovery, find, probe, a capture (the
-tone, timestamps, the overflow), conv8's format, registers, the sensor, a freq-mode burst. The same on Ubuntu 22.04
-(arm64), with discovery of a fake bridge behind a second interface, given its address by NetworkManager and by
-systemd-networkd from a DHCP server with no router. Not yet against the firmware or a chip; the local backend
-needs Linux and hardware.
+Against `tools/fake_bridge/` (`ctest -R soapy_fake_bridge`), in CI on Ubuntu 24.04 and macOS: discovery, find,
+probe, a capture (the tone, timestamps, the overflow), conv8's format, registers, the sensor, a freq-mode burst.
+On Ubuntu 22.04 (arm64) also discovery of a fake bridge behind a second interface, given its address by
+NetworkManager and by systemd-networkd from a DHCP server with no router.
+
+Against a W12 bridge over USB (the network adapter, and the USB Serial/JTAG port), on macOS and on Ubuntu 22.04
+(arm64): discovery, probe, and receive at 125, 250, 400 and 576 kS/s with every sample delivered; closing and
+reopening, after a clean close, Ctrl-C or a kill. Not yet: transmit, Wi-Fi streaming, and the local backend
+(it needs a chip on a Linux board's SPI bus).
+
+From Python, SoapySDR 0.8.1 on ARM (Raspberry Pi OS / Debian 12, an Apple Silicon Mac) loses a dict's values in
+`SoapySDR.Device({...})` ([SoapySDR#472](https://github.com/pothosware/SoapySDR/issues/472), fixed in 0.9.0);
+there, pass a string: `SoapySDR.Device("driver=lr20xx,host=...")`.

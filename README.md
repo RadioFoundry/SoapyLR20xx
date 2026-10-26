@@ -1,6 +1,7 @@
 # SoapyLR20xx
 
-**A SoapySDR driver for the Semtech LR20xx: a LoRa transceiver used as a software-defined radio.**
+**A SoapySDR driver for the Semtech LR20xx: a LoRa transceiver used as a software-defined radio, on Linux and
+macOS.**
 
 The LR2021 has an undocumented path that streams its raw baseband, 16-bit I and Q, out of its FIFO, and another
 that takes samples in for transmit. This project turns that into a SoapySDR device, so GNU Radio, SDR++, CubicSDR,
@@ -8,7 +9,7 @@ that takes samples in for transmit. This project turns that into a SoapySDR devi
 
 Status: experimental. The I/Q paths were found and measured on the LR2021 with ROM 1.24 (on a LilyGO T-Display-P4
 and a Meshnology W12). Receiving works end to end on a W12 bridge: every rate up to 576 kS/s streams into SoapySDR
-over USB without loss. Transmit, Wi-Fi streaming and the Linux SPI backend are not yet tried on hardware.
+over USB without loss, on macOS and on Linux. Transmit, Wi-Fi streaming and the Linux SPI backend are not yet tried on hardware.
 
 ## How it fits together
 

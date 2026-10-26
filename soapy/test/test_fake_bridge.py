@@ -56,8 +56,7 @@ try:
     found = SoapySDR.Device.enumerate({"driver": "lr20xx", "host": host})
     check(len(found) == 1 and found[0]["host"] == host, "find by host")
 
-    # A string, not a dict: Homebrew's SoapySDR 0.8.1 under Python 3.14 loses a dict's keys on the way to make()
-    # (the module's find got "host=" alone; enumerate() and 0.9 are fine)
+    # A string, not a dict: SoapySDR 0.8.1's Python Device() on ARM loses a dict's values (SoapySDR#472, fixed in 0.9.0)
     sdr = SoapySDR.Device("driver=lr20xx,host=" + host)
     info = sdr.getHardwareInfo()
     check(info["board"] == "fake" and info["rom"] == "1.24" and info["rom_known"] == "true", "hardware info")

@@ -113,6 +113,9 @@ typedef struct {
     bool early;             /* a run ended before taking its bytes and sent nothing (R3.17): send it again */
     bool timed_out;
     int64_t key_us, end_us; /* the first key-up and the last TX_DONE (lr20xx_now_us) */
+    uint32_t restart_us;    /* the longest from a TX_DONE seen to the next run's SetTx sent */
+    uint32_t gap_us;        /* the longest between two looks at the chip: what the FIFO has to cover */
+    int done_level;         /* the fewest bytes in the FIFO at a TX_DONE between runs (-1: none) */
 } lr20xx_tx_stream_stats_t;
 
 /* Clear the TX FIFO, prefill it from pull, key up with cfg.start, keep the FIFO topped up, and on each TX_DONE send

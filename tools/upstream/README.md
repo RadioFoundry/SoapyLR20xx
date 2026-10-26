@@ -44,6 +44,8 @@ Gateway code this library leaves out on purpose; take it out again when bringing
 - `lr20xx_tx_max_run` and R3.43: an I/Q run's bytes are a 16-bit count, so I/Q runs are at most 32 767 samples
   (the gateway's `LR2021_TX_MAX_RUN` is right for its frequency samples only), and the spec's R3.12 should no
   longer call R3.5's cap wrong.
+- R3.44: the W12's GC1109 held in TX between runs (`rf_hold_tx`), fallback FS, SetTx before clearing TX_DONE; and
+  the W12's antenna power (the chip's + 12 dB in the PA band).
 
 ### Carried
 

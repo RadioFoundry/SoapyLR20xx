@@ -79,8 +79,9 @@ buffers (HELLO's `tx_max_samples`) is refused.
 | `freq` | int8 frequency, a count `tx_fdev` / 64 Hz | the input's instantaneous frequency: its phase step a sample (R3.10) |
 | `phase_step` | int8 phase steps, a count rate / 128 Hz | the same frequency (R3.18) |
 
-The TX rate is `setSampleRate(TX)` or `tx_rate`, 31.25 to 250 kS/s (R3.10); the TX gain is the PA's power in
-dBm, −9.5 up to the board's most.
+The TX rate is `setSampleRate(TX)` or `tx_rate`, 31.25 to 250 kS/s (R3.10); the TX gain is the chip's PA power in
+dBm, −9.5 up to the board's most. A board's own front end comes after it: the W12's GC1109 adds about 12 dB (up to
+about +27 dBm at the antenna) between 860 and 930 MHz, and takes about 19 dB off elsewhere (R3.44).
 
 What each mode sends right, as `getBandwidth(TX)` reports it (twice the limit), with a warning the first time a
 burst goes past it:
@@ -91,8 +92,8 @@ burst goes past it:
 - `freq`: ±127 counts of `tx_fdev` / 64, ±4.06 kHz at the default 2048: raise `tx_fdev` for more.
 - `phase_step`: ±127 / 128 of the rate.
 
-A burst goes out as runs back to back, each a dip of about −20 dB for 0.2–0.5 ms on air (R3.15): I/Q runs are at
-most 32 767 samples (R3.43), the others 65 535.
+A burst goes out as runs back to back, with a dip of 0.2–0.5 ms on air between them (R3.15, R3.44): I/Q runs are
+at most 32 767 samples (R3.43), the others 65 535.
 
 ## A USB bridge on Linux
 
@@ -149,8 +150,8 @@ kS/s int16 and 576 kS/s int8 past that link (`firmware/README.md`).
 
 Transmit on the W12 from Linux, against the bench's receiver a room away (915 MHz, 0 dBm; 461.4625 MHz through the
 board's 915 MHz filter at 22 dBm): every mode at 48–125 kS/s, tones where they belong inside the mode's limit (the
-carrier on frequency with the board's ppm set), halved past it (R3.25), images at the rate (R3.26). Bursts longer
-than a run (R3.43) need the bridge built from this tree. Not yet: the local backend (it needs a chip on a Linux
+carrier on frequency with the board's ppm set), halved past it (R3.25), images at the rate (R3.26); bursts of 1–3 s at 48–125 kS/s their exact length,
+with 0.2–0.5 ms seams between runs. Not yet: the local backend (it needs a chip on a Linux
 board's SPI bus).
 
 From Python, SoapySDR 0.8.1 on ARM (Raspberry Pi OS / Debian 12, an Apple Silicon Mac) loses a dict's values in

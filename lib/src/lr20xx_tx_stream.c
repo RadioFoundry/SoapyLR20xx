@@ -28,6 +28,7 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
     if (!st)
         st = &z;
     memset(st, 0, sizeof *st);
+    st->done_level = -1;
     if (!c || !c->start || !c->start_len)
         return LR20XX_ERR_INVALID_ARG;
     uint8_t f[12];
@@ -63,9 +64,13 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
     if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)
         goto out;
     st->key_us = lr20xx_now_us();
+    int64_t last = st->key_us;
 
     for (;;) {
         const int64_t now = lr20xx_now_us();
+        if (now - last > (int64_t)st->gap_us)
+            st->gap_us = (uint32_t)(now - last);
+        last = now;
         if (now - st->key_us > max_us) {
             st->timed_out = true;
             e = LR20XX_ERR_TIMEOUT;
@@ -95,10 +100,16 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
                 e = LR20XX_OK;
                 break;
             }
-            /* the next run: the setup persists, SetTx again (R3.15) */
-            if ((e = lr20xx_write(d, f, lr20xx_cmd_clear_irq(f, LR20XX_IRQ_TX_DONE))) != LR20XX_OK ||
-                (e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)
+            /* the next run: the setup persists, SetTx again (R3.15); SetTx first and the IRQ cleared after, without
+             * a status read, for a shorter seam (R3.44) */
+            if (st->done_level < 0 || level < st->done_level)
+                st->done_level = level;
+            if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK ||
+                (e = lr20xx_send(d, f, lr20xx_cmd_clear_irq(f, LR20XX_IRQ_TX_DONE))) != LR20XX_OK)
                 break;
+            const int64_t t = lr20xx_now_us() - now;
+            if (t > (int64_t)st->restart_us)
+                st->restart_us = (uint32_t)t;
             continue;
         }
         const int free_bytes = FIFO_BYTES - (int)level;

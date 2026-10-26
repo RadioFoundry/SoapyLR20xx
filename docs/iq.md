@@ -428,6 +428,14 @@ Measured on a W12 (ROM 1.24) on 2026-10-24 with the driver's packet API (`lr20xx
   the FIFO still holding the rest (flags 0x04). 32 750 samples went out whole at 125 kS/s, 32 812 ended after
   88 bytes; runs of 38 400, 48 000 and 64 000 samples ended at their byte counts mod 65 536. So I/Q runs are at most
   32 767 samples, as R3.5 had it (W12, ROM 1.24, iq_polar and iq_phase, 2026-10-26).
+- **R3.44** Seams on the W12: with the board's RF switch table, all three DIOs go low between runs (the GC1109 in
+  shutdown), and each run after the first came back 22–28 dB low for 5–13 ms before full power, whatever the
+  fallback (FS or standby RC) and with SetPaConfig and SetTxParams sent again. The tone stayed on its frequency
+  through it. With the TX pattern also set for standby (mask bit 0) during the transmission, the seams are 0.2–0.5
+  ms, as R3.15 had them, at 48, 96 and 125 kS/s. The host's part of a restart is about 260 µs. The GC1109's bypass
+  passes the chip's output about 34 dB below its PA path (a 17.8 dB pad, then the PA's 30 dB), so the W12's antenna
+  gets about the chip's power + 12 dB, up to about +27 dBm. Setting 0xF30800 bit 14 before SetTx didn't make a run
+  continuous: TX_DONE still came at the run's length (W12, ROM 1.24, 2026-10-26).
 ## 4. Not known
 
 - The meaning of the route payload's other bytes, and of sources other than the one used (byte 5 = 0x0A).

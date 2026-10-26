@@ -485,6 +485,32 @@ static void transmit(void)
     lr20xx_close(d);
 }
 
+/* A board with a front end on RF switch DIOs: held in TX between runs, its own table back after (R3.44) */
+static void transmit_front_end(void)
+{
+    lr20xx_iq_t iq;
+    lr20xx_t *d = chip(false);
+    lr20xx_iq_init(&iq, d, &lr20xx_board_w12, false);
+    lr20xx_iq_tx_t tx = {.mode = LR20XX_TX_FREQ, .center_hz = 915e6, .rate = 48000, .fdev_hz = 2048, .samples = 4800};
+    M.n_ops = 0;
+    pull_n = 4800;
+    lr20xx_tx_stream_stats_t st;
+    lr20xx_err_t e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    const int key = find_op(LR20XX_SET_TX, 0);
+    int held = 0, back = 0;
+    for (int i = 0; i < M.n_ops; i++) {
+        if (M.ops[i] != LR20XX_SET_DIO_RF_SWITCH || M.args[i][0] != 11)
+            continue;
+        if (i < key && M.args[i][1] == (0x06 | LR20XX_RFSW_STANDBY))
+            held = i;
+        if (i > key && M.args[i][1] == 0x06)
+            back = i;
+    }
+    CHECK(e == LR20XX_OK && key > 0 && held > 0 && back > key, "the front end held in TX, then its table (%d %d %d)",
+          held, key, back);
+    CHECK(st.done_level == -1 && st.restart_us == 0, "one run: no restarts");
+}
+
 int main(void)
 {
     plans();
@@ -497,6 +523,7 @@ int main(void)
     stream(LR20XX_IQ_FSK16, 250000, true, "FSK16 250 k, IRQ");
     stream(LR20XX_IQ_CONV8, 384000, true, "CONV8 384 k, IRQ");
     transmit();
+    transmit_front_end();
     printf("lr20xx iq: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;
 }

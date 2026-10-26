@@ -102,6 +102,20 @@ static void rf_setup(lr20xx_iq_t *iq, double hz)
     }
 }
 
+/* The board's RF switch table; hold: during a transmission, the TX pattern in standby and FS too, so an external
+ * front end stays on between runs (the W12's GC1109, shut down between runs, came back 22-28 dB low for 5-13 ms:
+ * R3.44) */
+static void rf_hold_tx(lr20xx_iq_t *iq, double hz, bool hold)
+{
+    uint8_t dio[LR20XX_BOARD_RFSW_MAX], modes[LR20XX_BOARD_RFSW_MAX], f[12];
+    int n = lr20xx_board_rfsw(iq->board, hz, dio, modes);
+    for (int i = 0; i < n; i++)
+        cmd(iq, f, lr20xx_cmd_set_dio_rf_switch(f, dio[i],
+                                                (uint8_t)(modes[i] | (hold && (modes[i] & LR20XX_RFSW_TX_LF)
+                                                                          ? LR20XX_RFSW_STANDBY
+                                                                          : 0))));
+}
+
 static bool hf(double hz) { return hz > 1.2e9; }
 
 /* The receiver the route sits in (2.1; R2.19 for FSK), at the center. calib: CalibFE there first. */
@@ -455,7 +469,7 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
         .ramp_code = 4,
         .pa_lf_duty = iq->board->pa_lf_duty,
         .pa_lf_slices = iq->board->pa_lf_slices,
-        .fallback = LR20XX_FALLBACK_STBY_RC,
+        .fallback = LR20XX_FALLBACK_FS, /* between runs: the synthesizer stays up for the next SetTx */
         .rate = tx->rate,
         .fdev_hz = tx->fdev_hz,
         .rx_bw = 0x1C,
@@ -489,7 +503,9 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
             .bytes_per_s = tx->rate * (uint32_t)sb,
             .max_ms = tx->max_ms > 0 ? tx->max_ms : total_ms ? (int)(total_ms + 2000) : 10000,
         };
+        rf_hold_tx(iq, hz, true);
         e = lr20xx_tx_stream(iq->dev, &c, pad_pull, &pad, stats);
+        rf_hold_tx(iq, hz, false);
         if (e != LR20XX_OK)
             failed(iq, "transmit", e);
     }

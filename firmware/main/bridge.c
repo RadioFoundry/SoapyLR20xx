@@ -151,6 +151,9 @@ static void run_tx(void)
     B.job.pos = 0;
     memset(&B.job.stats, 0, sizeof B.job.stats);
     B.job.e = lr20xx_iq_transmit(&iq, &B.tx, tx_pull, NULL, &B.job.stats);
+    const lr20xx_tx_stream_stats_t *s = &B.job.stats;
+    ESP_LOGI(TAG, "tx: %d runs, %u refills, restart %" PRIu32 " us, gap %" PRIu32 " us, FIFO at TX_DONE %d, flags 0x%02x",
+             s->runs, s->refills, s->restart_us, s->gap_us, s->done_level, s->tx_flags);
     if (B.streaming)
         B.gap_pending = true; /* no samples while it transmitted */
     unlock();

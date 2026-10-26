@@ -1433,6 +1433,7 @@ unsafe extern "C" {
     ) -> ::core::ffi::c_int;
     pub fn lr20xx_tx_start_frame(s: *const lr20xx_tx_setup_t, buf: *mut u8, timeout: u32) -> usize;
     pub fn lr20xx_tx_sample_bytes(mode: lr20xx_tx_mode_t) -> ::core::ffi::c_int;
+    pub fn lr20xx_tx_max_run(mode: lr20xx_tx_mode_t) -> u32;
     pub fn lr20xx_phase_step_sample(hz: f32, rate: u32) -> i8;
     pub fn lr20xx_fsk4_fdev(outer_hz: f32) -> u32;
     pub fn lr20xx_fsk4_pack(symbols: *const i8, n: usize, out: *mut u8) -> usize;

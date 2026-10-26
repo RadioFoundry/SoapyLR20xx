@@ -435,11 +435,13 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
         snprintf(iq->error, sizeof iq->error, "transmit: untested on ROM %u.%u", iq->rom_major, iq->rom_minor);
         return LR20XX_ERR_NOT_SUPPORTED;
     }
-    /* Runs of equal length up to the 16-bit count (R3.12), so the zeros that fill the last are fewer than the runs */
+    /* Runs of equal length up to the 16-bit counts (R3.12, R3.43), so the zeros that fill the last are fewer than the
+     * runs */
     const int sb = lr20xx_tx_sample_bytes(tx->mode);
-    uint32_t run = LR20XX_TX_MAX_RUN;
+    const uint32_t max_run = lr20xx_tx_max_run(tx->mode);
+    uint32_t run = max_run;
     if (tx->samples && tx->mode != LR20XX_TX_CW) {
-        uint64_t runs = (tx->samples + LR20XX_TX_MAX_RUN - 1) / LR20XX_TX_MAX_RUN;
+        uint64_t runs = (tx->samples + max_run - 1) / max_run;
         run = (uint32_t)((tx->samples + runs - 1) / runs);
     }
     const uint32_t cal_hz = (uint32_t)lrint(hz);

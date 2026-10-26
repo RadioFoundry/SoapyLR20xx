@@ -47,7 +47,7 @@ static struct {
     int resets_seen;
     /* TX */
     bool tx;
-    int tx_level, tx_run, tx_sent;
+    int tx_level, tx_run, tx_sent, tx_sb;
     double tx_bytes_per_us, tx_carry;
     uint32_t irq;
     int tx_rate;
@@ -159,11 +159,15 @@ static void respond(int idx, const uint8_t *tx, size_t len, uint8_t *rx)
     case LR20XX_CLEAR_FIFO_IRQ_FLAGS: M.rx_flags &= (uint8_t)~tx[2]; break;
     case LR20XX_CLEAR_IRQ: M.irq &= ~be32(tx + 2); break;
     case LR20XX_CONFIG_FIFO_IRQ: M.irq_high_at = tx[4] << 8 | tx[5]; break;
-    case LR20XX_RAW_TX: M.tx_run = tx[2] << 8 | tx[3]; M.tx_rate = (int)be32(tx + 4); break;
+    case LR20XX_RAW_TX: /* as the chip: the run is a 16-bit byte count, two bytes a sample for I/Q (R3.43) */
+        M.tx_sb = tx[8] == LR20XX_RAW_TX_IQ ? 2 : 1;
+        M.tx_run = ((tx[2] << 8 | tx[3]) * M.tx_sb) & 0xFFFF;
+        M.tx_rate = (int)be32(tx + 4);
+        break;
     case LR20XX_SET_TX:
         M.tx = true;
         M.tx_sent = 0;
-        M.tx_bytes_per_us = M.tx_rate / 1e6; /* FREQ: a byte a sample */
+        M.tx_bytes_per_us = M.tx_rate * M.tx_sb / 1e6;
         break;
     default: break;
     }
@@ -458,6 +462,18 @@ static void transmit(void)
     raw = find_op(LR20XX_RAW_TX, 0);
     CHECK(e == LR20XX_OK && st.runs == 2 && (M.args[raw][0] << 8 | M.args[raw][1]) == 50000,
           "100 000: two runs of 50 000 (%d, %d runs)", e, st.runs);
+
+    /* I/Q: a run's bytes are a 16-bit count too (R3.43), so 100 000 samples are four runs of 25 000 */
+    M.n_ops = 0;
+    pull_n = 200000;
+    tx.mode = LR20XX_TX_IQ_POLAR;
+    e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    raw = find_op(LR20XX_RAW_TX, 0);
+    CHECK(e == LR20XX_OK && st.runs == 4 && (M.args[raw][0] << 8 | M.args[raw][1]) == 25000,
+          "100 000 I/Q: four runs of 25 000 (%d, %d runs)", e, st.runs);
+    CHECK(lr20xx_tx_max_run(LR20XX_TX_IQ_PHASE) == 32767 && lr20xx_tx_max_run(LR20XX_TX_FREQ) == 65535,
+          "the run caps");
+    tx.mode = LR20XX_TX_FREQ;
 
     /* another frequency: calibrated there */
     M.n_ops = 0;

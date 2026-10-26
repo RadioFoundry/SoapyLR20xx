@@ -41,6 +41,9 @@ Gateway code this library leaves out on purpose; take it out again when bringing
 - `lr20xx.c`: the driver behind a HAL (`lr20xx_hal.h`) and a port (`lr20xx_port.h`), so it runs on Linux too.
   A larger change than the gateway needs; offer if it wants a host build of the driver.
 - `lr20xx_iq.c`: the session, reader and transmit run as a portable library, out of `fe_lr2021.c`.
+- `lr20xx_tx_max_run` and R3.43: an I/Q run's bytes are a 16-bit count, so I/Q runs are at most 32 767 samples
+  (the gateway's `LR2021_TX_MAX_RUN` is right for its frequency samples only), and the spec's R3.12 should no
+  longer call R3.5's cap wrong.
 
 ### Carried
 

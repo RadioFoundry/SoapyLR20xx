@@ -253,8 +253,8 @@ the 900 MHz band). Where a fact below corrects R3.1–R3.8 it says so.
   samples, even with a 256-bit preamble and a 32-bit sync word configured. Key-up has a settling transient of about
   1 ms.
 - **R3.12** N = 65 535 works (0.52 s at 125 kS/s). N = 0 sends nothing, doesn't consume the FIFO, and stays in TX
-  until SetTx's timeout (IRQ bit 21). Selector 0 ran 31 250 complex samples (62 500 bytes) with no wrap, so its
-  byte count isn't 16-bit (corrects R3.5's cap); runs past that aren't tested.
+  until SetTx's timeout (IRQ bit 21). Selector 0 ran 31 250 complex samples (62 500 bytes) with no wrap; past 64 KB
+  it does wrap, as R3.5 had it (R3.43).
 - **R3.13** Underflow: the chip holds the last sample's frequency until N samples have passed, and sets TX FIFO flag
   0x20. Samples written to the FIFO after the underflow are never sent. The FIFO must not run dry.
 - **R3.14** Commands during a run: SetFskModulationParams answers OK and changes the deviation live; WriteRegMem32
@@ -424,6 +424,10 @@ Measured on a W12 (ROM 1.24) on 2026-10-24 with the driver's packet API (`lr20xx
   wrong symbols in 52; 0x01, 0x03, 0x05, 0xFD and 0xFF give 3–5 (0x05: 3, mean 3.1–5.2). So about 6% of symbols
   wrong instead of about 25%, still above the 1% of R3.41. The driver sends 0x05 (W12, 461.3375 MHz, 2026-10-24).
 
+- **R3.43** An I/Q run's bytes are a 16-bit count: a run of N samples ends after (2N mod 65 536) bytes, TX_DONE with
+  the FIFO still holding the rest (flags 0x04). 32 750 samples went out whole at 125 kS/s, 32 812 ended after
+  88 bytes; runs of 38 400, 48 000 and 64 000 samples ended at their byte counts mod 65 536. So I/Q runs are at most
+  32 767 samples, as R3.5 had it (W12, ROM 1.24, iq_polar and iq_phase, 2026-10-26).
 ## 4. Not known
 
 - The meaning of the route payload's other bytes, and of sources other than the one used (byte 5 = 0x0A).

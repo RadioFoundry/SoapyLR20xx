@@ -273,6 +273,14 @@ private:
                                : "LR20xx: no answer from " + where_ + " (command 0x" + hex(cmd) + ")");
         if (p.err) {
             std::string why(p.ans.begin(), p.ans.end());
+            lr20xx_link_tx_result_t r{};
+            if (cmd == LR20XX_CMD_TX_COMMIT && lr20xx_link_get_tx_result(p.ans.data(), p.ans.size(), &r)) {
+                char b[160]; /* the transmission's stats, not text */
+                std::snprintf(b, sizeof b, "%d runs, %u bytes in, TX FIFO flags 0x%02x%s%s", (int)r.runs,
+                              (unsigned)r.sent, r.tx_flags, r.early ? ", a run ended early" : "",
+                              r.timed_out ? ", timed out" : "");
+                why = b;
+            }
             throw Error(p.err, "LR20xx: command 0x" + hex(cmd) + " refused (" + std::to_string(p.err) + ")" +
                                    (why.empty() ? "" : ": " + why));
         }

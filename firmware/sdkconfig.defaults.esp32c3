@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+# The ESP32-C3's defaults (ESP-IDF loads this after sdkconfig.defaults when the target is esp32c3): one core at
+# 160 MHz, 4 MB flash, no PSRAM, so smaller buffers in internal RAM (Kconfig's defaults: a 48 KB ring, 64 KB to
+# transmit). Its USB is a USB Serial/JTAG port: the link over it is sdkconfig.defaults.jtag. Build it with
+#   idf.py set-target esp32c3, then -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.jtag" build
+# Not run on a board yet.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-4mb.csv"
+
+# A bare module and an LR20xx breakout, wired clear of the C3's strapping pins (2, 8, 9), its flash (11 to 17), USB
+# (18, 19) and UART0 (20, 21). A real board sets its own, as sdkconfig.defaults.w12 does for the W12.
+CONFIG_LR20XX_BOARD="generic"
+CONFIG_LR20XX_NSS=10
+CONFIG_LR20XX_SCK=6
+CONFIG_LR20XX_MOSI=7
+CONFIG_LR20XX_MISO=5
+CONFIG_LR20XX_NRESET=4
+CONFIG_LR20XX_BUSY=3
+CONFIG_LR20XX_IRQ_GPIO=1
+CONFIG_LR20XX_PA_EN_GPIO=-1

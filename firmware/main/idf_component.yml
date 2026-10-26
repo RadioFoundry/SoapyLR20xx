@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+# TinyUSB only for the native USB port's links (the serial link's CDC port, or the network over USB).
+dependencies:
+  espressif/esp_tinyusb:
+    version: "^2.0.0"
+    rules:
+      - if: "$CONFIG{LR20XX_TINYUSB} == 1"

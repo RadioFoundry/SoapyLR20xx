@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+[package]
+name = "lr20xx-link"
+description = "The SoapyLR20xx bridge link: frames, payloads and a blocking client, in pure Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The interfaces to send discovery on (MIT OR BSD-3-Clause)
+if-addrs = "0.13"

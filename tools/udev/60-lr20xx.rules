@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+# The bridge (firmware/) on Linux: an ESP32-S3, Espressif's USB vendor ID 303a, so this covers every Espressif
+# board. Install:
+#   sudo cp tools/udev/60-lr20xx.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# then unplug and plug the bridge in again. Positive matches only: a negated parent match (SUBSYSTEMS!=, ATTRS!=)
+# holds for the device itself and skips everything.
+
+ACTION=="remove", GOTO="lr20xx_end"
+
+# ModemManager probes a serial port next to a network port as a modem, sending it AT commands: keep it off.
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="303a", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# The serial ports to whoever is logged in at the machine, as well as the dialout group.
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", SUBSYSTEMS=="usb", ATTRS{idVendor}=="303a", TAG+="uaccess"
+
+LABEL="lr20xx_end"

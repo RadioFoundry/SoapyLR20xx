@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+# The serial link on the USB Serial/JTAG port: the built-in USB of the C3, C6, H2 and S3, which needs no driver
+# on the host and keeps flashing over the same port working. The console and the log move to UART0. Layer it last:
+#   -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.w12;sdkconfig.defaults.jtag"
+CONFIG_LR20XX_LINK_SERIAL=y
+CONFIG_LR20XX_SERIAL_USB_JTAG=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

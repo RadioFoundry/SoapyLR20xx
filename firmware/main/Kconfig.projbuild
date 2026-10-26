@@ -1,0 +1,148 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+menu "LR20xx bridge"
+
+    config LR20XX_BOARD
+        string "Board (lr20xx_board_parse: a name and changes, e.g. \"w12\", \"generic tcxo=3 irq=7\")"
+        default "w12"
+        help
+            What the board puts around the chip: its clock, RF switch, IRQ DIO, range and PA. The library's
+            lr20xx_board.h lists the names and the keys.
+
+    config LR20XX_ALLOW_UNTESTED
+        bool "Run raw I/Q on a chip ROM not in the library's table"
+        default n
+        help
+            The raw paths are undocumented and known on the LR2021's ROM 1.24 only. Another ROM may hang the
+            chip or give garbage.
+
+    menu "Pins"
+        config LR20XX_SPI_HOST
+            int "SPI host (1: SPI2, 2: SPI3)"
+            range 1 2
+            default 1
+        config LR20XX_SPI_HZ
+            int "SPI clock (Hz; 16 MHz at most)"
+            range 1000000 16000000
+            default 16000000
+        config LR20XX_NSS
+            int "NSS GPIO"
+            default 8
+        config LR20XX_SCK
+            int "SCK GPIO"
+            default 9
+        config LR20XX_MOSI
+            int "MOSI GPIO"
+            default 10
+        config LR20XX_MISO
+            int "MISO GPIO"
+            default 11
+        config LR20XX_NRESET
+            int "NRESET GPIO"
+            default 12
+        config LR20XX_BUSY
+            int "BUSY GPIO"
+            default 13
+        config LR20XX_IRQ_GPIO
+            int "IRQ GPIO (the board's IRQ DIO; -1 for none: the reader polls the FIFO level)"
+            default 7
+        config LR20XX_PA_EN_GPIO
+            int "Front-end supply GPIO, driven high (-1 for none)"
+            default 4
+    endmenu
+
+    config LR20XX_RING_KB
+        int "Sample buffer between the reader and the link (KB, in PSRAM if there is some)"
+        range 16 4096
+        default 1024 if SPIRAM
+        default 48
+        help
+            1 MB is 1.8 s at 576 kS/s int8. The link drops samples (and flags a gap) when it fills.
+
+    config LR20XX_TX_BUF_KB
+        int "Transmit buffer (KB, in PSRAM if there is some): the longest transmission"
+        range 16 6144
+        default 2048 if SPIRAM
+        default 64
+
+    choice LR20XX_LINK
+        prompt "Link to the host"
+        default LR20XX_LINK_TCP
+        config LR20XX_LINK_TCP
+            bool "TCP: over Wi-Fi, and the USB network if it's on"
+        config LR20XX_LINK_SERIAL
+            bool "Serial: the USB Serial/JTAG port, a UART, or a TinyUSB CDC port"
+    endchoice
+
+    choice LR20XX_SERIAL_PORT
+        prompt "Serial port"
+        depends on LR20XX_LINK_SERIAL
+        default LR20XX_SERIAL_USB_JTAG if SOC_USB_SERIAL_JTAG_SUPPORTED
+        default LR20XX_SERIAL_UART
+        help
+            The console and the log must be on another port (the build stops if they aren't).
+        config LR20XX_SERIAL_USB_JTAG
+            bool "USB Serial/JTAG (the C3, C6, H2 and S3's built-in USB port)"
+            depends on SOC_USB_SERIAL_JTAG_SUPPORTED
+        config LR20XX_SERIAL_UART
+            bool "UART"
+        config LR20XX_SERIAL_TINYUSB
+            bool "TinyUSB CDC (the S2 and S3's native USB port)"
+            depends on SOC_USB_OTG_SUPPORTED
+    endchoice
+
+    config LR20XX_SERIAL_UART_NUM
+        int "UART"
+        depends on LR20XX_SERIAL_UART
+        range 0 2
+        default 1
+    config LR20XX_SERIAL_TX
+        int "UART TX GPIO"
+        depends on LR20XX_SERIAL_UART
+        default 17
+    config LR20XX_SERIAL_RX
+        int "UART RX GPIO"
+        depends on LR20XX_SERIAL_UART
+        default 18
+    config LR20XX_SERIAL_BAUD
+        int "UART baud rate"
+        depends on LR20XX_SERIAL_UART
+        default 2000000
+        help
+            The host's side must match (the module's baud=). 2 Mbaud is about 200 KB/s: int8 at 125 kS/s packs
+            into 190 KB/s. Many USB-UART bridges top out at 2 or 3 Mbaud.
+
+    config LR20XX_USB_NCM
+        bool "The network over USB too (NCM: the bridge as a USB network adapter)"
+        depends on LR20XX_LINK_TCP && SOC_USB_OTG_SUPPORTED
+        default n
+        help
+            TinyUSB's NCM class on the native USB port, with a DHCP server. The host gets an address on a /24 with
+            the bridge, and the TCP link, discovery and HTTP work over it as over Wi-Fi (which stays on if it has a
+            network). The port also carries the console, as a CDC serial port; the log goes there too.
+            Linux, macOS and Windows 11 have NCM drivers built in.
+
+    config LR20XX_USB_NCM_IP
+        string "The bridge's address on the USB network (empty: a /30 in 10.73.0.0/16 picked from the MAC)"
+        depends on LR20XX_USB_NCM
+        default ""
+        help
+            Empty, each bridge has its own /30, so several on one host don't share a subnet; the console's status
+            command gives it. Set, the bridge is that address on a /24 and the host gets the next one.
+
+    # Whether TinyUSB is in (1) or not (0), for idf_component.yml's rule. An int: a build always writes it, where a
+    # bool that's off can go unwritten, and an option missing from the sdkconfig stops the component manager.
+    config LR20XX_TINYUSB
+        int
+        default 1 if LR20XX_SERIAL_TINYUSB || LR20XX_USB_NCM
+        default 0
+
+    config LR20XX_HOSTNAME
+        string "Wi-Fi hostname"
+        default "lr20xx-bridge"
+
+    config LR20XX_HTTP
+        bool "HTTP status and OTA (GET /api/status, POST /api/ota)"
+        default y
+
+endmenu

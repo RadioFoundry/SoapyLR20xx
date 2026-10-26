@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+[workspace]
+resolver = "2"
+members = ["lr20xx-sys", "lr20xx", "lr20xx-link"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Spencer Fowler"]
+repository = "https://github.com/RadioFoundry/SoapyLR20xx"
+rust-version = "1.70"

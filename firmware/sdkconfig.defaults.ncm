@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+# The network over USB (NCM) as well as Wi-Fi, with the console on a CDC port beside it. TinyUSB takes the native
+# USB port from the USB-Serial-JTAG: flash it again with OTA over the USB network, or hold BOOT while plugging in.
+# Layer it last:
+#   -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.w12;sdkconfig.defaults.ncm"
+CONFIG_LR20XX_USB_NCM=y
+CONFIG_TINYUSB_NET_MODE_NCM=y
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+CONFIG_TINYUSB_CDC_RX_BUFSIZE=512
+CONFIG_TINYUSB_CDC_TX_BUFSIZE=2048
+# Room for full-size frames each way, so a burst of RX_DATA doesn't wait on the host
+CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=4
+CONFIG_TINYUSB_NCM_OUT_NTB_BUFFS_COUNT=4
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
+# Full-speed USB carries ~1 MB/s in all: bigger NTBs (several datagrams a USB transfer) and full-size TCP segments
+CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE=8192
+CONFIG_LWIP_TCP_MSS=1460

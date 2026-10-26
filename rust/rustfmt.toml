@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+max_width = 120
+use_small_heuristics = "Max"

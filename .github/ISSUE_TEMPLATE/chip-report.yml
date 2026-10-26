@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+name: A chip or ROM report
+description: You ran the raw I/Q paths on a chip, ROM or board this project doesn't list yet. Thank you.
+labels: [chip report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The raw I/Q paths are undocumented and known only on the LR2021 with ROM 1.24 (`lib/src/lr20xx_chips.c`).
+        What you saw on another part or ROM, working or not, is what lets that table grow.
+  - type: input
+    id: part
+    attributes:
+      label: Part
+      description: The marking on the chip (LR2021, LR2022, LR2012, ...)
+    validations:
+      required: true
+  - type: input
+    id: rom
+    attributes:
+      label: ROM version
+      description: "`rom=` in `SoapySDRUtil --probe=\"driver=lr20xx,...\"`, or GetVersion's answer"
+    validations:
+      required: true
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      description: The module or board, and how the host reached it (bridge over USB or Wi-Fi, or Linux spidev)
+  - type: textarea
+    id: results
+    attributes:
+      label: What worked and what didn't
+      description: Modes and rates you tried (cs16 / cs8, kS/s), receive and transmit, losses, anything odd. Paste the probe output if you can.
+    validations:
+      required: true

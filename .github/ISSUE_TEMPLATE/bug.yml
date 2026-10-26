@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+name: A bug
+description: Something doesn't work as the docs say.
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How to make it happen
+      description: The device arguments, the program (GNU Radio, SDR++, SoapySDRUtil, ...), the rate and format
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: OS, SoapySDR, this project's commit, the bridge firmware's version (`firmware` in /api/status)

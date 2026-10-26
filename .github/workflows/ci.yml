@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  host:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SoapySDR
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update && sudo apt-get install -y libsoapysdr-dev soapysdr-tools python3-soapysdr
+          else
+            brew install soapysdr
+          fi
+      - name: Build
+        run: |
+          cmake -S . -B build/host -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+          cmake --build build/host -j4
+      - name: Test
+        run: ctest --test-dir build/host --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test with ASan and UBSan (the library and the link)
+        run: |
+          f="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all"
+          cmake -S . -B build/asan -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="$f" -DCMAKE_EXE_LINKER_FLAGS="$f"
+          cmake --build build/asan -j4
+          ctest --test-dir build/asan --output-on-failure
+
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --all-features
+
+  firmware:
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v5.5.4
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - { name: w12, target: esp32s3, defaults: "sdkconfig.defaults;sdkconfig.defaults.w12" }
+          - { name: w12-ncm, target: esp32s3, defaults: "sdkconfig.defaults;sdkconfig.defaults.w12;sdkconfig.defaults.ncm" }
+          - { name: w12-jtag, target: esp32s3, defaults: "sdkconfig.defaults;sdkconfig.defaults.w12;sdkconfig.defaults.jtag" }
+          - { name: w12-usb, target: esp32s3, defaults: "sdkconfig.defaults;sdkconfig.defaults.w12;sdkconfig.defaults.usb" }
+          # no C3 board yet: built so it keeps building (one core, no PSRAM, the USB Serial/JTAG link)
+          - { name: c3-jtag, target: esp32c3, defaults: "sdkconfig.defaults;sdkconfig.defaults.jtag" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.variant.name }}
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          cd firmware
+          idf.py -B ../build/fw-${{ matrix.variant.name }} -D SDKCONFIG=../build/fw-${{ matrix.variant.name }}/sdkconfig \
+            -D SDKCONFIG_DEFAULTS="${{ matrix.variant.defaults }}" set-target ${{ matrix.variant.target }} build

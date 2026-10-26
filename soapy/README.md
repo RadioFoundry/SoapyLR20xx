@@ -1,0 +1,132 @@
+# soapy
+
+The SoapySDR module, `driver=lr20xx` (`lr20xxSupport`). One device class over two backends:
+
+- **link**: a bridge (`firmware/`) that reads the chip and streams its samples, over TCP or a USB serial port, in
+  the frames of `proto/include/lr20xx_link.h`. Any platform.
+- **local**: a chip on this machine's spidev and GPIO lines, driven through `lib/` (`lr20xx_iq.h`) with a reader
+  thread at `SCHED_FIFO` when allowed. Linux only.
+
+| File | What |
+|---|---|
+| `SoapyLR20xx.hpp` | the Device, the backend interface, the sample queue |
+| `SoapyLR20xx.cpp` | the Device and the module's registration |
+| `Backends.cpp` | the link (TCP, serial), the local backend, UDP discovery, the rate lists |
+| `test/test_fake_bridge.py` | end to end against `tools/fake_bridge/` (ctest `soapy_fake_bridge`) |
+
+## Build
+
+Part of the top-level build when SoapySDR is installed (Debian / Ubuntu `libsoapysdr-dev`, Homebrew `soapysdr`), or
+on its own:
+
+```sh
+cmake -S soapy -B build/soapy && cmake --build build/soapy && ctest --test-dir build/soapy
+SOAPY_SDR_PLUGIN_PATH=$PWD/build/soapy SoapySDRUtil --probe="driver=lr20xx,host=192.0.2.10"
+```
+
+`cmake --install` puts the module in SoapySDR's module directory.
+
+## Arguments
+
+| Argument | Backend | |
+|---|---|---|
+| `host=<addr>[:port]` | link | TCP, port 7373 by default |
+| `serial=<path>` | link | a serial port (`/dev/ttyACM0`, `/dev/cu.usbmodem…`, `/dev/ttyUSB0`) |
+| `baud=<rate>` | link | a UART's rate, the bridge's `CONFIG_LR20XX_SERIAL_BAUD` (a USB port needs none) |
+| (none) | link | the first bridge that answers a UDP broadcast on port 7374 within 300 ms, sent on every interface |
+| `discover=<addr>` | link | send the discovery there alone instead of the broadcasts |
+| `spidev=<path>` | local | `/dev/spidev0.0` |
+| `gpiochip=<path>` | local | `/dev/gpiochip0` by default |
+| `busy=<line>`, `nreset=<line>` | local | GPIO line offsets, both needed |
+| `irq=<line>`, `pa_en=<line>`, `speed=<Hz>` | local | optional: the IRQ DIO's line, a front-end supply driven high, the SPI clock |
+| `board=<text>` | local | `lr20xx_board_parse` text: `w12`, `generic tcxo=3 irq=7`, … |
+| `allow_untested=true` | local | run on a ROM not in `lr20xx_chips.h` |
+
+Settings named in the arguments (`iq_mode=conv8`, `tx_mode=freq`, …) are applied when the device opens.
+
+## Receive
+
+The chip's own rate, not a resampled one: `setSampleRate` picks a mode and `getSampleRate` returns the rate it
+gives (docs/iq.md section 2; `lr20xx_iq.h`'s table).
+
+| `iq_mode` | Native format | Rates |
+|---|---|---|
+| `auto` (default) | CS16 up to 260 kS/s, then CS8 | `fsk16`'s list, then `conv8`'s range |
+| `lora` | CS16 | 125 000, 250 000 |
+| `fsk16` | CS16 | the FSK rate codes', up to 260 kS/s |
+| `conv8` | CS8 | any rate the converter makes, up to 576 kS/s |
+
+CS8's full scale is 32: the chip's int8 clips at −32..+31 (R2.26). CF32 is scaled by the native full scale.
+`readStream` gives each buffer a time from its first sample's index in the stream (`SOAPY_SDR_HAS_TIME`), so a
+loss shows as a jump; the loss itself is returned once as `SOAPY_SDR_OVERFLOW` before the samples after it.
+
+Gain: one element, `LNA`, −8 to 53.5 dB in the chip's 13 steps (R2.25), set to the nearest; `setGainMode(true)` is
+the chip's AGC. Until a gain or the AGC is set, it's 53.5 dB for CS16 and 9 dB for CS8: int8's 6 bits clip on the
+noise alone from about 28 dB, and under the AGC (R2.33), which logs a warning in CS8. `setFrequencyCorrection` takes ppm. Sensor `temperature` and the `LR20XX` register interface
+(ReadRegMem32 / WriteRegMem32) work only while not receiving.
+
+## Transmit
+
+Half duplex, by bursts: `writeStream` buffers until `SOAPY_SDR_END_BURST`, then the burst is converted and sent
+whole (the receiver pauses for it); `readStreamStatus` gives `SOAPY_SDR_END_BURST` when it has gone out,
+`SOAPY_SDR_UNDERFLOW` if the chip's FIFO ran dry (R3.13), `SOAPY_SDR_TIMEOUT`. A burst longer than the device
+buffers (HELLO's `tx_max_samples`) is refused.
+
+| `tx_mode` | Sent | |
+|---|---|---|
+| `iq_polar` (default) | int8 I/Q, phase and magnitude | `lr20xx_polar_iq8`, magnitudes under `polar_rmin` (0.2) pushed out to it (R3.27) |
+| `iq_phase` | int8 I/Q, the phase at constant power | `lr20xx_phase_iq8` (R3.22) |
+| `freq` | int8 frequency, a count `tx_fdev` / 64 Hz | the input's instantaneous frequency: its phase step a sample (R3.10) |
+| `phase_step` | int8 phase steps, a count rate / 128 Hz | the same frequency (R3.18) |
+
+The TX rate is `setSampleRate(TX)` or `tx_rate`, 31.25 to 250 kS/s (R3.10); the TX gain is the PA's power in
+dBm, −9.5 up to the board's most.
+
+## A USB bridge on Linux
+
+The bridge's USB port gives a network (NCM), a serial port (CDC ACM), or both, as its firmware is built.
+
+**Network.** The kernel's `cdc_ncm` driver makes it a USB Ethernet adapter, named `enx` and its MAC. The bridge
+gives the host an address by DHCP on a /30 of its own in 10.73.0.0/16 (the bridge the first, the host the second),
+with no router, so the default route stays where it was. On Ubuntu Desktop, NetworkManager does it unasked: a
+"Wired connection" comes up with the address in a few seconds. Ubuntu Server leaves the adapter down; netplan brings
+it up in about 5 s. The bridge's lease may name it as a DNS server, which answers nothing; `use-dns: false` keeps
+the host from asking it (NetworkManager: `nmcli connection modify <name> ipv4.ignore-auto-dns yes`).
+
+```yaml
+# /etc/netplan/60-lr20xx.yaml (chmod 600, then sudo netplan apply)
+network:
+  version: 2
+  ethernets:
+    lr20xx:
+      match:
+        driver: cdc_ncm
+      dhcp4: true
+      dhcp4-overrides:
+        use-dns: false
+      dhcp6: false
+      link-local: []
+      optional: true
+```
+
+Discovery finds it with no arguments: it goes out on every interface. The bridge is the address below the host's
+(`ip -4 addr show`): `host=10.73.x.y`. Its console's `status` prints it too.
+
+**Serial.** `/dev/ttyACM0` and up, group `dialout` (`sudo usermod -aG dialout $USER`, then log in again). On a
+machine with ModemManager (Ubuntu has it), a new ACM port next to a network port gets probed as a modem for a few
+seconds. [`tools/udev/60-lr20xx.rules`](../tools/udev/60-lr20xx.rules) keeps ModemManager off Espressif's devices
+(USB vendor 303a) and gives the logged-in user the serial ports:
+
+```sh
+sudo cp tools/udev/60-lr20xx.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+```
+
+Then `serial=/dev/ttyACM0`.
+
+## Tested
+
+On macOS against `tools/fake_bridge/` (`ctest -R soapy_fake_bridge`): discovery, find, probe, a capture (the
+tone, timestamps, the overflow), conv8's format, registers, the sensor, a freq-mode burst. The same on Ubuntu 22.04
+(arm64), with discovery of a fake bridge behind a second interface, given its address by NetworkManager and by
+systemd-networkd from a DHCP server with no router. Not yet against the firmware or a chip; the local backend
+needs Linux and hardware.

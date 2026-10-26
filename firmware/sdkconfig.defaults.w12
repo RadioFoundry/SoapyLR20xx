@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+# Meshnology W12 (ESP32-S3R8: 16 MB flash, 8 MB octal PSRAM; a Semtech LR2021 with a GC1109 front end). Layer it on
+# sdkconfig.defaults. One USB-C, on the S3's native USB: flash in ROM download mode; the console is the USB serial
+# port (the wifi command), with the log on it too.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# The LR2021's pins (the gateway's "LR2021 pins and options" defaults, run on the board there)
+CONFIG_LR20XX_BOARD="w12"
+CONFIG_LR20XX_SPI_HOST=1
+CONFIG_LR20XX_SPI_HZ=16000000
+CONFIG_LR20XX_NSS=8
+CONFIG_LR20XX_SCK=9
+CONFIG_LR20XX_MOSI=10
+CONFIG_LR20XX_MISO=11
+CONFIG_LR20XX_NRESET=12
+CONFIG_LR20XX_BUSY=13
+# DIO7 is wired to GPIO7 (DIO8 to GPIO14)
+CONFIG_LR20XX_IRQ_GPIO=7
+# The sub-GHz front end's supply (PA_EN_M)
+CONFIG_LR20XX_PA_EN_GPIO=4
+
+# Wi-Fi's hot code in flash, not IRAM: internal RAM is what's short on the W12 while streaming
+# CONFIG_ESP_WIFI_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_RX_IRAM_OPT is not set

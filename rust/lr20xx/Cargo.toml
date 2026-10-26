@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Spencer Fowler
+[package]
+name = "lr20xx"
+description = "A Semtech LR20xx as an SDR: safe Rust over liblr20xx, the C core of SoapyLR20xx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# An adapter from embedded-hal 1.0's SpiDevice and digital pins to the chip's HAL.
+embedded-hal = ["dep:embedded-hal"]
+
+[dependencies]
+lr20xx-sys = { path = "../lr20xx-sys", version = "0.1.0" }
+embedded-hal = { version = "1", optional = true }
+
+[dev-dependencies]
+lr20xx-link = { path = "../lr20xx-link", version = "0.1.0" }

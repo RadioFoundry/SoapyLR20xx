@@ -82,6 +82,18 @@ buffers (HELLO's `tx_max_samples`) is refused.
 The TX rate is `setSampleRate(TX)` or `tx_rate`, 31.25 to 250 kS/s (R3.10); the TX gain is the PA's power in
 dBm, −9.5 up to the board's most.
 
+What each mode sends right, as `getBandwidth(TX)` reports it (twice the limit), with a warning the first time a
+burst goes past it:
+
+- `iq_polar`, `iq_phase`: an instantaneous frequency up to ±min(20 kHz, 0.31 × rate) (R3.25); past it the chip
+  sends some other frequency. Each sample is held, so a tone at f has images at f ± rate, about −23 to −29 dBc at
+  48–96 kS/s (R3.26).
+- `freq`: ±127 counts of `tx_fdev` / 64, ±4.06 kHz at the default 2048: raise `tx_fdev` for more.
+- `phase_step`: ±127 / 128 of the rate.
+
+A burst goes out as runs back to back, each a dip of about −20 dB for 0.2–0.5 ms on air (R3.15): I/Q runs are at
+most 32 767 samples (R3.43), the others 65 535.
+
 ## A USB bridge on Linux
 
 The bridge's USB port gives a network (NCM), a serial port (CDC ACM), or both, as its firmware is built.

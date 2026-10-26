@@ -132,6 +132,13 @@ try:
     sdr.writeSetting("tx_fdev", "2048")
     sdr.setSampleRate(SOAPY_SDR_TX, 0, 48000)
     sdr.setFrequency(SOAPY_SDR_TX, 0, 915e6)
+    # the widest the mode sends right: freq's ±127 counts of fdev / 64, I/Q's phase path (R3.25)
+    bw_freq = sdr.getBandwidth(SOAPY_SDR_TX, 0)
+    sdr.writeSetting("tx_mode", "iq_polar")
+    bw_iq = sdr.getBandwidth(SOAPY_SDR_TX, 0)
+    sdr.writeSetting("tx_mode", "freq")
+    check(abs(bw_freq - 2 * 127 * float(sdr.readSetting("tx_fdev")) / 64) < 1 and abs(bw_iq - 2 * 0.31 * 48000) < 1,
+          "TX bandwidth %.0f / %.0f" % (bw_freq, bw_iq))
     tx = sdr.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CF32)
     sdr.activateStream(tx)
     n = 4800

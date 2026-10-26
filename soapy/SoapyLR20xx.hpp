@@ -189,6 +189,8 @@ private:
     int last_step_ = 13;
     bool gain_set_ = false;     /* the user chose a gain or the AGC: no default by format then (configure_rx) */
     bool warned_agc8_ = false;
+    bool warned_tx_limit_ = false;
+    double tx_freq_limit() const;
     lr20xx_link_plan_t plan_{};
     bool have_plan_ = false;
     bool allow_untested_ = false;

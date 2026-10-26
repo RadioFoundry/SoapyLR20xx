@@ -28,6 +28,13 @@ const struct {
     int bytes;
 } TX_MODES[] = {{"freq", LR20XX_TX_FREQ, 1}, {"phase_step", LR20XX_TX_PHASE_STEP, 1},
                 {"iq_phase", LR20XX_TX_IQ_PHASE, 2}, {"iq_polar", LR20XX_TX_IQ_POLAR, 2}};
+const char *tx_mode_name(int mode)
+{
+    for (auto &m : TX_MODES)
+        if (m.mode == mode)
+            return m.name;
+    return "?";
+}
 const double TX_RATES[] = {31250, 38400, 48000, 62500, 76800, 96000, 125000, 250000}; /* docs/iq.md R3.10 */
 constexpr double TX_POWER_MIN = -9.5; /* the LF PA's floor, 0.5 dB steps (DS 7.4.3) */
 
@@ -265,6 +272,17 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
     return (int)numElems;
 }
 
+/* The widest instantaneous frequency the transmit mode sends right: I/Q's phase path (R3.25), a frequency sample's
+ * ±127 counts of fdev / 64, a phase step's ±127 of rate / 128. */
+double Device::tx_freq_limit() const
+{
+    if (tx_mode_ == LR20XX_TX_IQ_POLAR || tx_mode_ == LR20XX_TX_IQ_PHASE)
+        return lr20xx_iq_freq_limit((uint32_t)std::lround(tx_rate_));
+    if (tx_mode_ == LR20XX_TX_FREQ)
+        return 127.0 * tx_fdev_ / 64.0;
+    return 127.0 * tx_rate_ / 128.0;
+}
+
 /* The burst buffered so far, converted to the transmit mode's samples and sent; its outcome queued for
  * readStreamStatus. */
 void Device::send_tx(TxStream &t)
@@ -280,6 +298,24 @@ void Device::send_tx(TxStream &t)
             bytes = m.bytes;
     std::vector<uint8_t> data(n * (size_t)bytes);
     const uint32_t rate = (uint32_t)std::lround(tx_rate_);
+    if (!warned_tx_limit_) {
+        /* past the mode's frequency limit the chip sends something else (I/Q: counted where the magnitude is up,
+         * since near zero any waveform's phase steps are large) */
+        const bool iq = tx_mode_ == LR20XX_TX_IQ_POLAR || tx_mode_ == LR20XX_TX_IQ_PHASE;
+        const double limit = tx_freq_limit(), rmin = iq ? std::max(polar_rmin_, 0.2) : 0;
+        size_t over = 0;
+        for (size_t i = 1; i < n; i++)
+            if (std::abs(x[i]) >= rmin && std::abs(x[i - 1]) >= rmin &&
+                std::abs(std::arg(x[i] * std::conj(x[i - 1]))) * tx_rate_ / (2 * M_PI) > limit * 1.02)
+                over++;
+        if (over * 1000 > n) {
+            warned_tx_limit_ = true;
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                           "LR20xx: %.1f%% of the burst is past %s's ±%.0f Hz, which it doesn't send right%s",
+                           100.0 * (double)over / (double)n, tx_mode_name(tx_mode_), limit,
+                           tx_mode_ == LR20XX_TX_FREQ ? " (raise tx_fdev)" : "");
+        }
+    }
     if (tx_mode_ == LR20XX_TX_IQ_POLAR || tx_mode_ == LR20XX_TX_IQ_PHASE) {
         std::vector<float> iq(2 * n);
         for (size_t i = 0; i < n; i++) {
@@ -578,7 +614,9 @@ SoapySDR::RangeList Device::getSampleRateRange(const int dir, const size_t ch) c
 double Device::getBandwidth(const int dir, const size_t) const
 {
     std::lock_guard<std::mutex> l(m_);
-    return dir == SOAPY_SDR_RX && have_plan_ ? plan_.passband_hz : 0;
+    if (dir == SOAPY_SDR_TX)
+        return 2 * tx_freq_limit();
+    return have_plan_ ? plan_.passband_hz : 0;
 }
 
 std::vector<double> Device::listBandwidths(const int dir, const size_t ch) const

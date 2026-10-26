@@ -754,6 +754,7 @@ SoapySDR::Kwargs result(const lr20xx_link_hello_t &h, const std::string &key, co
 SoapySDR::KwargsList find_lr20xx(const SoapySDR::Kwargs &args)
 {
     SoapySDR::KwargsList out;
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "LR20xx find: %s", SoapySDR::KwargsToString(args).c_str());
     auto it = args.find("driver");
     if (it != args.end() && it->second != "lr20xx")
         return out;

@@ -165,11 +165,11 @@ void link_ncm_start(void)
         return;
     }
 
-    /* addresses only: no router, so the host keeps its own default route, and no DNS (the bridge answers none; a
-     * Linux host otherwise sends it lookups) */
+    /* addresses only: no router, so the host keeps its own default route. No DNS either (the bridge answers none;
+     * a Linux host otherwise sends it lookups): that's CONFIG_LWIP_DHCPS_ADD_DNS off (sdkconfig.defaults.ncm), since
+     * with it on the server offers itself exactly when DNS offering is off. */
     dhcps_offer_t off = 0;
     esp_netif_dhcps_option(ncm, ESP_NETIF_OP_SET, ESP_NETIF_ROUTER_SOLICITATION_ADDRESS, &off, sizeof off);
-    esp_netif_dhcps_option(ncm, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &off, sizeof off);
     esp_netif_action_start(ncm, NULL, 0, NULL);
     esp_netif_action_connected(ncm, NULL, 0, NULL);
     ESP_LOGI(TAG, "USB network up: the bridge is %s, the host gets %s by DHCP", addr, peer);

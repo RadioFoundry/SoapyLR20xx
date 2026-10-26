@@ -18,3 +18,5 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 # Full-speed USB carries ~1 MB/s in all: bigger NTBs (several datagrams a USB transfer) and full-size TCP segments
 CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE=8192
 CONFIG_LWIP_TCP_MSS=1460
+# The DHCP server offers no DNS (with this on it offers itself when DNS offering is off)
+# CONFIG_LWIP_DHCPS_ADD_DNS is not set

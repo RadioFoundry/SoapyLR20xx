@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "links.h"
 #include "nvs.h"
@@ -133,6 +134,16 @@ static int cmd_restart(int argc, char **argv)
 }
 
 #if CONFIG_LR20XX_USB_NCM
+/* When the host last opened the port (DTR up). For a moment after, a host tty still in its cooked mode echoes back
+ * what the bridge logged: that's dropped, not taken for a command. */
+static volatile int64_t opened_at;
+
+static void on_line(int itf, cdcacm_event_t *event)
+{
+    if (event->line_state_changed_data.dtr)
+        opened_at = esp_timer_get_time();
+}
+
 /* esp_console's REPLs are for the UART and the USB Serial/JTAG; on TinyUSB's CDC it's this. Echoes what's typed;
  * stdin doesn't block, so it waits a little when there's nothing. */
 static void cdc_repl(void *arg)
@@ -146,6 +157,10 @@ static void cdc_repl(void *arg)
         if (c == EOF) {
             clearerr(stdin);
             vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+        if (esp_timer_get_time() - opened_at < 200000) {
+            n = 0;
             continue;
         }
         if (c == '\r' || c == '\n') {
@@ -169,7 +184,7 @@ static void cdc_repl(void *arg)
 
 static esp_err_t cdc_console(void)
 {
-    const tinyusb_config_cdcacm_t acm = {.cdc_port = TINYUSB_CDC_ACM_0};
+    const tinyusb_config_cdcacm_t acm = {.cdc_port = TINYUSB_CDC_ACM_0, .callback_line_state_changed = on_line};
     esp_err_t e = tinyusb_cdcacm_init(&acm);
     if (e == ESP_OK)
         e = tinyusb_console_init(TINYUSB_CDC_ACM_0);

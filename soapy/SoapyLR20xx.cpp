@@ -778,7 +778,9 @@ SoapySDR::KwargsList find_lr20xx(const SoapySDR::Kwargs &args)
                 out.push_back(result(f.hello, "host", f.host));
         }
     } catch (const std::exception &e) {
-        SoapySDR::logf(SOAPY_SDR_DEBUG, "LR20xx find: %s", e.what());
+        /* a device named outright that doesn't answer is worth saying; discovery finding nothing isn't */
+        const bool named = args.count("host") || args.count("serial");
+        SoapySDR::logf(named ? SOAPY_SDR_WARNING : SOAPY_SDR_DEBUG, "LR20xx find: %s", e.what());
     }
     return out;
 }

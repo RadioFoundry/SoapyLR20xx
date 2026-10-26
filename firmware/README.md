@@ -59,8 +59,13 @@ Measured on the W12 to a Mac, 60 s at each rate, AGC on (2026-10-26):
 
 Full-speed USB carries about 1 MB/s in all. Packing is what fits 250 kS/s cs16 (1 MB/s unpacked) and 576 kS/s cs8;
 without it they ran at 92 % and 81 %. The NCM link also needs its larger NTB buffers (`sdkconfig.defaults.ncm`).
-That Wi-Fi link carried about 0.8 MB/s: the chip lost nothing, but the buffer filled and the bridge dropped frames
-for the host to see as overflows.
+Over Wi-Fi the rate is the link's: the chip loses nothing, but past what the link carries the buffer fills and the
+bridge drops frames for the host to see as overflows. That link carried 0.8 MB/s in the run above and 0.3 MB/s out
+of the bridge later the same day (0.75 MB/s in), with the signal at −46 dBm both times. `GET /api/speedtest?kb=N`
+measures what a link carries out of the bridge with no samples behind it, `POST /api/speedtest` the other way, and
+`/api/status` gives the signal (`wifi_rssi`) and channel. Two things matter on a lossy link: samples go out in
+frames of up to 4 KB, held up to 10 ms to fill, and the S3's Wi-Fi sends no A-MPDUs (a lost subframe stalled TCP for
+a second; `sdkconfig.defaults.esp32s3`).
 
 ## Settings (menuconfig, "LR20xx bridge")
 
@@ -76,7 +81,7 @@ for the host to see as overflows.
 | `LR20XX_USB_NCM_IP` | empty | The bridge's USB address: empty for a /30 in 10.73.0.0/16 picked from the MAC |
 | Serial port | USB Serial/JTAG | USB Serial/JTAG, a UART (number, pins, baud: 2 Mbaud by default), or TinyUSB CDC |
 | `LR20XX_HOSTNAME` | `lr20xx-bridge` | |
-| `LR20XX_HTTP` | on | `GET /api/status`, `POST /api/ota` |
+| `LR20XX_HTTP` | on | `GET /api/status`, `POST /api/ota`, `/api/speedtest` |
 
 ## Flashing
 

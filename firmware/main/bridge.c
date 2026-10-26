@@ -38,6 +38,7 @@ static const char *TAG = "bridge";
 #define RING_BYTES ((size_t)CONFIG_LR20XX_RING_KB * 1024)
 #define TX_BYTES ((size_t)CONFIG_LR20XX_TX_BUF_KB * 1024)
 #define MSG_MAX (LR20XX_LINK_RX_HDR + LR20XX_IQ_FIFO_BYTES + 4) /* one read and its header */
+#define COALESCE_US 10000 /* the longest a frame waits to fill */
 #define READER_PRIO 24
 #define STATUS_US 20000000
 #ifdef CONFIG_LR20XX_ALLOW_UNTESTED
@@ -626,11 +627,27 @@ int bridge_link_pump(bridge_link_t *l, int wait_ms)
     lr20xx_link_get_rx_hdr(p, len, &h);
     const size_t sb = h.format == LR20XX_IQ_CS8 ? 2 : 4;
     uint64_t next = h.first + (len - LR20XX_LINK_RX_HDR) / sb;
+    /* Coalesced: up to COALESCE_US for the frame to fill, so the link carries a few large packets, not one per FIFO
+     * read. Over Wi-Fi, 70-370 byte segments at 125 kS/s spent the air on overhead and TCP stalled for seconds. */
+    const int64_t until = esp_timer_get_time() + COALESCE_US;
     for (;;) {
         size_t m = xStreamBufferNextMessageLengthBytes(B.ring);
-        if (m < LR20XX_LINK_RX_HDR || len + m - LR20XX_LINK_RX_HDR > LR20XX_LINK_MAX_PAYLOAD)
+        if (m && (m < LR20XX_LINK_RX_HDR || len + m - LR20XX_LINK_RX_HDR > LR20XX_LINK_MAX_PAYLOAD))
             break;
-        m = xMessageBufferReceive(B.ring, B.carry, MSG_MAX, 0);
+        if (m) {
+            m = xMessageBufferReceive(B.ring, B.carry, MSG_MAX, 0);
+        } else {
+            const int64_t left = until - esp_timer_get_time();
+            if (left <= 0 || len + MSG_MAX - LR20XX_LINK_RX_HDR > LR20XX_LINK_MAX_PAYLOAD || !B.streaming)
+                break;
+            m = xMessageBufferReceive(B.ring, B.carry, MSG_MAX, pdMS_TO_TICKS((left + 999) / 1000));
+            if (!m)
+                break;
+            if (len + m - LR20XX_LINK_RX_HDR > LR20XX_LINK_MAX_PAYLOAD) {
+                B.carry_len = m; /* starts the next frame */
+                break;
+            }
+        }
         lr20xx_link_rx_hdr_t h2;
         if (!lr20xx_link_get_rx_hdr(B.carry, m, &h2))
             break;

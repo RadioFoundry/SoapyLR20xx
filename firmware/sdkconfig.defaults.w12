@@ -21,6 +21,3 @@ CONFIG_LR20XX_IRQ_GPIO=7
 # The sub-GHz front end's supply (PA_EN_M)
 CONFIG_LR20XX_PA_EN_GPIO=4
 
-# Wi-Fi's hot code in flash, not IRAM: internal RAM is what's short on the W12 while streaming
-# CONFIG_ESP_WIFI_IRAM_OPT is not set
-# CONFIG_ESP_WIFI_RX_IRAM_OPT is not set

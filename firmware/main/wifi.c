@@ -119,7 +119,11 @@ static int cmd_status(int argc, char **argv)
 {
     static char js[512];
     bridge_status_json(js, sizeof js);
-    printf("wifi: %s %s\n{%s}\n", connected ? "up" : "down", connected ? ip : "", js);
+    wifi_ap_record_t ap;
+    if (connected && esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
+        printf("wifi: up %s, %d dBm on channel %u\n{%s}\n", ip, ap.rssi, (unsigned)ap.primary, js);
+    else
+        printf("wifi: %s %s\n{%s}\n", connected ? "up" : "down", connected ? ip : "", js);
 #if CONFIG_LR20XX_USB_NCM
     link_ncm_status(js, sizeof js);
     printf("%s\n", js);

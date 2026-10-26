@@ -112,7 +112,18 @@ public:
 
     lr20xx_link_hello_t hello() override
     {
-        auto a = request(LR20XX_CMD_HELLO, nullptr, 0);
+        /* again if no answer: a serial port can lose the bridge's first bytes after it opens (a USB CDC port under
+         * a VM's passthrough lost its first two transfers) */
+        std::vector<uint8_t> a;
+        for (int tries = 3;; tries--) {
+            try {
+                a = request(LR20XX_CMD_HELLO, nullptr, 0, 1.0);
+                break;
+            } catch (const Error &e) {
+                if (tries <= 1 || e.code != LR20XX_ERR_TIMEOUT)
+                    throw;
+            }
+        }
         lr20xx_link_hello_t h{};
         if (!lr20xx_link_get_hello(a.data(), a.size(), &h))
             throw Error(-1, "LR20xx: short HELLO answer from " + where_);
@@ -268,9 +279,10 @@ private:
                                [&] { return pending_[seq].done || closed_; });
         Pending p = std::move(pending_[seq]);
         pending_.erase(seq);
+        if (!p.done && ok)
+            throw Error(-1, "LR20xx: link to " + where_ + " closed");
         if (!p.done)
-            throw Error(-1, ok ? "LR20xx: link to " + where_ + " closed"
-                               : "LR20xx: no answer from " + where_ + " (command 0x" + hex(cmd) + ")");
+            throw Error(LR20XX_ERR_TIMEOUT, "LR20xx: no answer from " + where_ + " (command 0x" + hex(cmd) + ")");
         if (p.err) {
             std::string why(p.ans.begin(), p.ans.end());
             lr20xx_link_tx_result_t r{};

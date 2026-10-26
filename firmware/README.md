@@ -54,9 +54,13 @@ Measured on the W12 to a Mac, 60 s at each rate, AGC on (2026-10-26):
 |---|---|---|---|---|---|
 | USB network (NCM) | 100 % | 100 % | 100 % | 100 % | 5.8 KB |
 | USB Serial/JTAG (8 s each) | 100 % | 99.6 % | 100 % | 99.9 % | 0.7 KB |
+| USB network, to Linux in a VM (120 s / 60 s) | 100 % | 100 % | 100 % | 100 % | 53 KB |
+| Wi-Fi, one room from the access point (20 s each) | 100 % | 83 % | 98 % | 74 % | 1 MB (full) |
 
 Full-speed USB carries about 1 MB/s in all. Packing is what fits 250 kS/s cs16 (1 MB/s unpacked) and 576 kS/s cs8;
 without it they ran at 92 % and 81 %. The NCM link also needs its larger NTB buffers (`sdkconfig.defaults.ncm`).
+That Wi-Fi link carried about 0.8 MB/s: the chip lost nothing, but the buffer filled and the bridge dropped frames
+for the host to see as overflows.
 
 ## Settings (menuconfig, "LR20xx bridge")
 

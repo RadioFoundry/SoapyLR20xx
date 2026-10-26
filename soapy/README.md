@@ -144,8 +144,14 @@ NetworkManager and by systemd-networkd from a DHCP server with no router.
 
 Against a W12 bridge over USB (the network adapter, and the USB Serial/JTAG port), on macOS and on Ubuntu 22.04
 (arm64): discovery, probe, and receive at 125, 250, 400 and 576 kS/s with every sample delivered; closing and
-reopening, after a clean close, Ctrl-C or a kill. Not yet: transmit, Wi-Fi streaming, and the local backend
-(it needs a chip on a Linux board's SPI bus).
+reopening, after a clean close, Ctrl-C or a kill. Over Wi-Fi from the Mac: 125 kS/s and 400 kS/s int8 whole; 250
+kS/s int16 and 576 kS/s int8 past that link (`firmware/README.md`).
+
+Transmit on the W12 from Linux, against the bench's receiver a room away (915 MHz, 0 dBm; 461.4625 MHz through the
+board's 915 MHz filter at 22 dBm): every mode at 48–125 kS/s, tones where they belong inside the mode's limit (the
+carrier on frequency with the board's ppm set), halved past it (R3.25), images at the rate (R3.26). Bursts longer
+than a run (R3.43) need the bridge built from this tree. Not yet: the local backend (it needs a chip on a Linux
+board's SPI bus).
 
 From Python, SoapySDR 0.8.1 on ARM (Raspberry Pi OS / Debian 12, an Apple Silicon Mac) loses a dict's values in
 `SoapySDR.Device({...})` ([SoapySDR#472](https://github.com/pothosware/SoapySDR/issues/472), fixed in 0.9.0);

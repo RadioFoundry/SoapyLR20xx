@@ -150,9 +150,21 @@ static void cdc_repl(void *arg)
 {
     static char line[160];
     size_t n = 0;
+    int64_t prompted = 0;
     printf("lr20xx> ");
     fflush(stdout);
     for (;;) {
+        /* A fresh prompt for a terminal that just opened, in two transfers: a USB CDC port under a VM's passthrough
+         * lost the first two after it opened, and better these than a command's answer. */
+        const int64_t opened = opened_at;
+        if (opened != prompted && esp_timer_get_time() - opened >= 200000) {
+            prompted = opened;
+            n = 0;
+            printf("\n");
+            fflush(stdout);
+            printf("lr20xx> ");
+            fflush(stdout);
+        }
         int c = fgetc(stdin);
         if (c == EOF) {
             clearerr(stdin);

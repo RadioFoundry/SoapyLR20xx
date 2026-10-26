@@ -56,10 +56,9 @@ try:
     found = SoapySDR.Device.enumerate({"driver": "lr20xx", "host": host})
     check(len(found) == 1 and found[0]["host"] == host, "find by host")
 
-    print("SoapySDR", SoapySDR.getLibVersion(), "API", SoapySDR.getAPIVersion(), flush=True)
-    SoapySDR.setLogLevel(SoapySDR.SOAPY_SDR_DEBUG)
-    sdr = SoapySDR.Device({"driver": "lr20xx", "host": host})
-    SoapySDR.setLogLevel(SoapySDR.SOAPY_SDR_INFO)
+    # A string, not a dict: Homebrew's SoapySDR 0.8.1 under Python 3.14 loses a dict's keys on the way to make()
+    # (the module's find got "host=" alone; enumerate() and 0.9 are fine)
+    sdr = SoapySDR.Device("driver=lr20xx,host=" + host)
     info = sdr.getHardwareInfo()
     check(info["board"] == "fake" and info["rom"] == "1.24" and info["rom_known"] == "true", "hardware info")
     check(abs(float(sdr.readSensor("temperature")) - 31.5) < 1e-3, "temperature")

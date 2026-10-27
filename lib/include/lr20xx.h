@@ -87,8 +87,6 @@ bool lr20xx_wait_irq(lr20xx_t *dev, int timeout_ms);
 bool lr20xx_has_irq(const lr20xx_t *dev);
 /* The IRQ pin's level now (1 or 0), -1 with no pin: a GPIO read, no SPI. */
 int lr20xx_irq_pin(lr20xx_t *dev);
-/* The BUSY pin: 1 high, 0 low. */
-int lr20xx_busy_pin(lr20xx_t *dev);
 
 /* ── Transmit (lr20xx_tx.h sets a mode up; docs/iq.md section 3) ── */
 

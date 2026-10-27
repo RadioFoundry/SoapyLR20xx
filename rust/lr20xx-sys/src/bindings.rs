@@ -1418,7 +1418,6 @@ unsafe extern "C" {
     pub fn lr20xx_wait_irq(dev: *mut lr20xx_t, timeout_ms: ::core::ffi::c_int) -> bool;
     pub fn lr20xx_has_irq(dev: *const lr20xx_t) -> bool;
     pub fn lr20xx_irq_pin(dev: *mut lr20xx_t) -> ::core::ffi::c_int;
-    pub fn lr20xx_busy_pin(dev: *mut lr20xx_t) -> ::core::ffi::c_int;
     pub fn lr20xx_tx_stream(
         dev: *mut lr20xx_t,
         cfg: *const lr20xx_tx_stream_cfg_t,

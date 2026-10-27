@@ -177,7 +177,7 @@ fn receive_session() {
     assert_eq!(s.rom_version(), (1, 0x18));
     let p = s.start(&IqConfig { rate: 250_000.0, mode: IqMode::Auto, center_hz: 915e6, ppm: 0.0, gain: 13 }).unwrap();
     assert_eq!(p.sample_bytes, 4);
-    m.0.lock().unwrap().fifo_level = 512;
+    m.0.lock().unwrap().fifo_level = 700; // past the reader's 640-byte target: read on the first look, whatever the sleeps
     let mut got = Vec::new();
     let mut total = 0;
     for _ in 0..4 {

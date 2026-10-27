@@ -660,6 +660,7 @@ static void transmit_front_end(void)
     CHECK(e == LR20XX_OK && key > 0 && held > 0 && back > key, "the front end held in TX, then its table (%d %d %d)",
           held, key, back);
     CHECK(st.done_level == -1 && st.restart_us == 0, "one run: no restarts");
+    lr20xx_close(d);
 }
 
 int main(void)

@@ -414,21 +414,29 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
         t->last_hz = 0;
         t->over = t->counted = 0;
     }
-    for (size_t i = 0; i < numElems; i++) {
-        std::complex<float> v;
-        if (t->format == SOAPY_SDR_CF32)
-            v = {((const float *)buffs[0])[2 * i], ((const float *)buffs[0])[2 * i + 1]};
-        else if (t->format == SOAPY_SDR_CS16)
-            v = {((const int16_t *)buffs[0])[2 * i] / 32768.0f, ((const int16_t *)buffs[0])[2 * i + 1] / 32768.0f};
-        else
-            v = {((const int8_t *)buffs[0])[2 * i] / 128.0f, ((const int8_t *)buffs[0])[2 * i + 1] / 128.0f};
-        t->buf.push_back(v);
-    }
     const bool end = flags & SOAPY_SDR_END_BURST;
     try {
-        /* a bridge that streams gets the samples as they come; otherwise they're gathered for the end */
-        if (streams || end)
-            tx_flush(*t, end);
+        /* a bridge that streams gets the samples as they come, in pieces so the first is on its way sooner (a
+         * timed burst starts on it); otherwise they're gathered for the end */
+        const size_t piece = streams ? 2048 : numElems;
+        size_t i = 0;
+        do {
+            /* a burst's first piece small (1 KB of I/Q, what the device prefills): a USB link sends it on its own */
+            const size_t to = std::min(numElems, i + (streams && t->n == 0 && i == 0 ? 512 : piece));
+            for (; i < to; i++) {
+                std::complex<float> v;
+                if (t->format == SOAPY_SDR_CF32)
+                    v = {((const float *)buffs[0])[2 * i], ((const float *)buffs[0])[2 * i + 1]};
+                else if (t->format == SOAPY_SDR_CS16)
+                    v = {((const int16_t *)buffs[0])[2 * i] / 32768.0f,
+                         ((const int16_t *)buffs[0])[2 * i + 1] / 32768.0f};
+                else
+                    v = {((const int8_t *)buffs[0])[2 * i] / 128.0f, ((const int8_t *)buffs[0])[2 * i + 1] / 128.0f};
+                t->buf.push_back(v);
+            }
+            if (streams || (end && i == numElems))
+                tx_flush(*t, end && i == numElems);
+        } while (i < numElems);
     } catch (const std::exception &e) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
         try {

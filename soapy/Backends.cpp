@@ -209,13 +209,32 @@ public:
         tx_sent_ = 0;
         uint8_t p[LR20XX_LINK_TX_BEGIN_SIZE];
         lr20xx_link_put_tx_begin(p, &tx_b_);
-        request(LR20XX_CMD_TX_BEGIN, p, sizeof p);
+        /* its answer checked later (begin_answer): the data follows it at once, a round trip sooner (the bridge
+         * takes them in order, and drops the data if it refused the TX_BEGIN) */
+        begin_seq_ = post(LR20XX_CMD_TX_BEGIN, p, sizeof p);
+        begin_waiting_ = true;
+    }
+
+    /* TX_BEGIN's answer: waited for (wait) or only if it has come; throws its refusal */
+    void begin_answer(bool wait)
+    {
+        if (!begin_waiting_)
+            return;
+        if (!wait) {
+            std::lock_guard<std::mutex> l(m_);
+            auto it = pending_.find(begin_seq_);
+            if (it != pending_.end() && !it->second.done && !closed_)
+                return;
+        }
+        if (begin_waiting_.exchange(false)) /* one thread takes it (tx_abort may come from another) */
+            await_answer(begin_seq_, LR20XX_CMD_TX_BEGIN);
     }
 
     void tx_data(const uint8_t *p, size_t n) override
     {
         if (!streams())
             return Backend::tx_data(p, n);
+        begin_answer(false);
         std::vector<uint8_t> f(LR20XX_LINK_HEADER + LR20XX_LINK_MAX_PAYLOAD);
         for (size_t off = 0; off < n; off += LR20XX_LINK_MAX_PAYLOAD) {
             size_t k = std::min<size_t>(LR20XX_LINK_MAX_PAYLOAD, n - off);
@@ -228,6 +247,7 @@ public:
     {
         if (!streams())
             return Backend::tx_commit();
+        begin_answer(true);
         /* the answer comes once it has gone out: at most all of it still to send, plus a margin */
         const double bps = (double)tx_b_.rate * (tx_b_.mode == LR20XX_TX_FREQ || tx_b_.mode == LR20XX_TX_PHASE_STEP ? 1 : 2);
         auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0,
@@ -243,6 +263,10 @@ public:
         if (!streams())
             return Backend::tx_abort();
         request(LR20XX_CMD_TX_ABORT, nullptr, 0);
+        try {
+            begin_answer(true); /* (refused or not: it's over) */
+        } catch (...) {
+        }
     }
 
     std::vector<uint32_t> read_reg(uint32_t addr, int n) override
@@ -350,12 +374,16 @@ private:
         }
     }
 
-    /* timeout_s < 0: 3 s, or 10 s while receiving, when the answer queues behind the samples already sent and a
-     * stalled Wi-Fi link can hold them for seconds (a late answer is dropped by its seq) */
+    /* A request and its answer. timeout_s < 0: 3 s, or 10 s while receiving, when the answer queues behind the
+     * samples already sent and a stalled Wi-Fi link can hold them for seconds (a late answer is dropped by its seq) */
     std::vector<uint8_t> request(uint16_t cmd, const void *args, size_t n, double timeout_s = -1)
     {
-        if (timeout_s < 0)
-            timeout_s = receiving_ ? 10.0 : 3.0;
+        return await_answer(post(cmd, args, n), cmd, timeout_s);
+    }
+
+    /* A request sent, its answer waited for later (await_answer) */
+    uint16_t post(uint16_t cmd, const void *args, size_t n)
+    {
         uint8_t f[LR20XX_LINK_HEADER + 64];
         uint16_t seq;
         {
@@ -373,6 +401,14 @@ private:
             pending_.erase(seq);
             throw;
         }
+        return seq;
+    }
+
+    /* timeout_s < 0: as request's */
+    std::vector<uint8_t> await_answer(uint16_t seq, uint16_t cmd, double timeout_s = -1)
+    {
+        if (timeout_s < 0)
+            timeout_s = receiving_ ? 10.0 : 3.0;
         std::unique_lock<std::mutex> l(m_);
         bool ok = cv_.wait_for(l, std::chrono::duration<double>(timeout_s),
                                [&] { return pending_[seq].done || closed_; });
@@ -502,6 +538,8 @@ private:
     std::atomic<bool> receiving_{false};
     std::atomic<int64_t> clock_off_us_{INT64_MIN}; /* the device's clock less the host's steady clock */
     uint64_t tx_sent_ = 0; /* a streamed transmission's bytes so far */
+    uint16_t begin_seq_ = 0;
+    std::atomic<bool> begin_waiting_{false}; /* TX_BEGIN's answer not looked at yet */
     lr20xx_link_parser_t parser_;
     std::thread reader_;
     std::atomic<bool> quit_{false};

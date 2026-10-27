@@ -233,8 +233,9 @@ class Client:
     def transmit(self, seq, tx, stop):
         def now():
             return int(time.monotonic() * 1e6)
-        # timed: receiving goes on until the set-up's time ahead (5 ms here); an abort before then leaves it alone
-        if tx["at"] and stop.wait(max(0.0, (tx["at"] - 5000 - now()) / 1e6)):
+        # timed: receiving goes on until the set-up's time ahead (50 ms here: stopping the stream thread takes a while
+        # on a busy runner); an abort before then leaves it alone
+        if tx["at"] and stop.wait(max(0.0, (tx["at"] - 50000 - now()) / 1e6)):
             return self.rsp(seq, ERR_INVALID_STATE, b"aborted")
         restart = self.streaming
         self.stop()  # half duplex

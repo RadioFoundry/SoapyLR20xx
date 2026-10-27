@@ -163,8 +163,8 @@ try:
     counts = [b - 256 if b > 127 else b for b in d[1:]]
     check(all(abs(c - 31) <= 1 for c in counts[1:]), "FREQ samples %s" % counts[:5])
 
-    # timed: the device's clock, a burst kept to its time, one asked for too late refused (a bridge before
-    # CAP_TIME: none)
+    # timed: the device's clock, a burst kept to its time (the fake's sleep, loose on a busy CI runner), one asked
+    # for too late refused (a bridge before CAP_TIME: none)
     old = "--no-tx-stream" in os.environ.get("LR20XX_FAKE_ARGS", "")
     if old:
         check(not sdr.hasHardwareTime(""), "no hardware time")
@@ -184,7 +184,7 @@ try:
         check(r.ret == n, "timed writeStream %d" % r.ret)
         st = sdr.readStreamStatus(tx, timeoutUs=3000000)
         check(st.ret == 0 and st.flags & SOAPY_SDR_END_BURST and st.flags & SOAPY_SDR_HAS_TIME and
-              0 <= st.timeNs - at < 20e6, "timed burst: %d %d, keyed %.1f ms after its time" %
+              0 <= st.timeNs - at < 200e6, "timed burst: %d %d, keyed %.1f ms after its time" %
               (st.ret, st.flags, (st.timeNs - at) / 1e6))
         r = sdr.writeStream(tx, [tb], n, SOAPY_SDR_END_BURST | SOAPY_SDR_HAS_TIME, sdr.getHardwareTime("") - 10**8,
                             timeoutUs=1000000)

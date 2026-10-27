@@ -49,6 +49,9 @@ static struct {
     uint32_t dio_irqs;     /* SetDioIrqConfig's mask: the IRQ pin */
     int64_t done_at;       /* the last TX_DONE */
     int64_t seam_max;      /* the longest from a TX_DONE to the next SetTx */
+    bool tail_settx;       /* SetTx taken in a run's last 50 us, the next run started at its end (R3.47) */
+    bool settx_queued;
+    int settx_refused, settx_taken;
     /* TX */
     bool tx;
     int tx_level, tx_run, tx_sent, tx_sb;
@@ -87,6 +90,13 @@ static void advance(void)
             M.tx = false;
             M.irq |= TX_DONE;
             M.done_at = now - (int64_t)(M.tx_carry / M.tx_bytes_per_us); /* when the last byte went */
+            if (M.settx_queued) { /* the next run at once */
+                M.settx_queued = false;
+                M.tx = true;
+                M.tx_sent = 0;
+                M.done_at = 0;
+                M.seam_max = M.seam_max > 0 ? M.seam_max : 1;
+            }
         }
     }
     F.irq_level = (M.irq_high_at && M.rx && M.level >= M.irq_high_at) || (M.irq & M.dio_irqs & ~0x3Fu);
@@ -105,6 +115,7 @@ static void respond(int idx, const uint8_t *tx, size_t len, uint8_t *rx)
         advance();
     }
     rx[0] = ST_OK;
+    rx[1] = (uint8_t)(M.tx ? LR20XX_MODE_TX : M.rx ? LR20XX_MODE_RX : LR20XX_MODE_FS); /* the chip's mode */
     if (op == 0 && M.pending) { /* a read's answer frame */
         rx[0] = ST_DATA;
         uint8_t *a = rx + 2;
@@ -177,6 +188,17 @@ static void respond(int idx, const uint8_t *tx, size_t len, uint8_t *rx)
         break;
     case LR20XX_SET_DIO_IRQ_CONFIG: M.dio_irqs = be32(tx + 3); break;
     case LR20XX_SET_TX:
+        if (M.tx) {
+            /* in a run's last 50 us: taken for when it ends; before, CMD_FAIL and the run goes on (R3.45) */
+            if (M.tail_settx && (M.tx_run - M.tx_sent) / M.tx_bytes_per_us <= 50 &&
+                M.tx_level >= M.tx_run - M.tx_sent) {
+                M.settx_queued = true;
+                M.settx_taken++;
+            } else {
+                M.settx_refused++;
+            }
+            break;
+        }
         if (M.done_at && F.now_us - M.done_at > M.seam_max)
             M.seam_max = F.now_us - M.done_at;
         M.done_at = 0;
@@ -530,6 +552,26 @@ static void transmit_pin(void)
           "four runs by the pin (%d, %s, %d runs, %zu bytes)", e, iq.error, st.runs, st.sent);
     CHECK(M.seam_max > 0 && M.seam_max < 40, "the next run's SetTx within %lld us of TX_DONE", (long long)M.seam_max);
     CHECK(st.refills > 100 && st.tx_flags == 0, "fed throughout: %u refills, flags 0x%02x", st.refills, st.tx_flags);
+
+    /* a chip that takes SetTx in a run's last 50 us: from the third run on, each sent ahead of TX_DONE (R3.47) */
+    M.tail_settx = true;
+    M.settx_refused = M.settx_taken = 0;
+    M.seam_max = 0;
+    pull_n = 400000;
+    tx.samples = 200000;
+    e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    CHECK(e == LR20XX_OK && st.runs == 7 && st.sent >= 400000 && !st.early,
+          "seven runs (%d, %s, %d runs, %zu bytes)", e, iq.error, st.runs, st.sent);
+    CHECK(st.queued >= 3 && st.queued == (unsigned)M.settx_taken && st.refused == (unsigned)M.settx_refused &&
+              st.refused <= 1,
+          "SetTx ahead of TX_DONE: %u taken, %u refused", st.queued, st.refused);
+    /* again: the delays learned, every restart queued */
+    pull_n = 400000;
+    e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    CHECK(e == LR20XX_OK && st.runs == 7 && st.queued == 6 && st.refused == 0,
+          "the next burst: all six restarts queued (%u, %u refused)", st.queued, st.refused);
+    M.tail_settx = false;
+    tx.samples = 100000;
     lr20xx_close(d);
 }
 

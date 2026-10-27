@@ -113,6 +113,10 @@ typedef struct {
     int64_t anchor_us;
     int32_t anchor_level;
     uint8_t reckon_n;
+    /* transmit: TX_DONE's delay past a run's length learned in the last burst (lr20xx_tx_stream_cfg_t.learned),
+     * for tx_learned_for's mode and rate */
+    int tx_learned[3];
+    uint32_t tx_learned_for;
     lr20xx_iq_stats_t stats;
     char error[128];
     uint8_t buf[LR20XX_IQ_FIFO_BYTES + 4] __attribute__((aligned(4)));

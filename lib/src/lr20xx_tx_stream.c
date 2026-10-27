@@ -84,6 +84,16 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
     double write_us = 0.6;  /* a FIFO write's time a byte, measured as it goes (16 MHz SPI: about 0.5) */
     bool held = false;      /* refills wait for the next run: the FIFO lasts past this one's end */
     int64_t retry_at = 0;   /* the pull had nothing yet: ask again from then */
+    /* The next run's SetTx sent ahead of this run's TX_DONE (R3.47): the chip takes it in the run's last 45-60 us
+     * and starts the next run sooner. TX_DONE is predicted from the run's start (its SetTx, or the TX_DONE before
+     * for a queued one): its length plus the delay measured for runs started that way. Refused (too early) costs
+     * more than it saves, so the lead backs off 10 us after a refusal and creeps back 1 us a success. */
+    int64_t queued_at = 0;  /* the next run's SetTx went out then */
+    int after_pin = c->learned ? c->learned[0] : -1; /* TX_DONE past a run's length from its start, us */
+    int after_queued = c->learned ? c->learned[1] : -1;
+    int after_first = c->learned ? c->learned[2] : -1;
+    bool run_queued = false; /* this run was started by a queued SetTx */
+    int lead = 35;          /* the queued SetTx this far ahead of the predicted TX_DONE, us */
     for (;;) {
         int64_t now = lr20xx_now_us();
         if (now - last > (int64_t)st->gap_us)
@@ -124,16 +134,57 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
         const bool overdue = pin && now - run_start > run_us + 2000;
         const bool raised = pin && lr20xx_irq_pin(d) > 0; /* read once: a second read could see an edge the first
                                                             * didn't and take the slow way */
-        if (raised && !overdue && st->sent > (size_t)(st->runs + 1) * c->run_bytes) {
-            /* TX_DONE with the next run's bytes in the FIFO: SetTx at once, the IRQ cleared after (R3.44), then
-             * the checks */
+        const bool next_in = st->sent > (size_t)(st->runs + 1) * c->run_bytes; /* the next run's bytes are in */
+        const int after = st->runs == 0 ? after_first
+                          : run_queued && after_queued >= 0 ? after_queued
+                                                            : after_pin; /* about the same */
+        if (pin && !raised && !overdue && next_in && !queued_at && after >= 0 && now >= run_start + run_us + after - lead) {
             if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)
                 break;
-            const int64_t t = lr20xx_now_us();
+            queued_at = lr20xx_now_us();
+            continue;
+        }
+        if (raised && !overdue && (next_in || queued_at)) {
+            /* TX_DONE with the next run's bytes in the FIFO: SetTx at once (unless it went in already), the IRQ
+             * cleared after (R3.44), then the checks */
+            int64_t t = queued_at;
+            if (!t) {
+                if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)
+                    break;
+                t = lr20xx_now_us();
+            }
             if ((e = lr20xx_send(d, f, lr20xx_cmd_clear_irq(f, LR20XX_IRQ_TX_DONE))) != LR20XX_OK)
                 break;
+            {
+                /* TX_DONE's delay past the run's length, for runs started this way (the first from standby) */
+                const int a = (int)(now - run_start - run_us);
+                int *m = st->runs == 0 ? &after_first : run_queued ? &after_queued : &after_pin;
+                if (a >= 0 && a < 1000)
+                    *m = *m < 0 ? a : (3 * *m + a) / 4;
+            }
+            run_queued = false;
+            if (queued_at) {
+                /* taken: the chip in TX already. Refused (sent mid-run): back in FS, so SetTx now */
+                lr20xx_status_t s;
+                if ((e = lr20xx_get_status(d, &s)) != LR20XX_OK)
+                    break;
+                if (s.mode == LR20XX_MODE_TX) {
+                    st->queued++;
+                    run_queued = true;
+                    t = now;
+                    if (lead < 45)
+                        lead++;
+                } else {
+                    st->refused++;
+                    lead = lead > 20 ? lead - 10 : 10;
+                    if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)
+                        break;
+                    t = lr20xx_now_us();
+                }
+            }
             if (t - now > (int64_t)st->restart_us)
                 st->restart_us = (uint32_t)(t - now);
+            queued_at = 0;
             st->runs++;
             st->end_us = now;
             run_start = t;
@@ -214,6 +265,8 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
                     st->restart_us = (uint32_t)(t - now);
                 run_start = t;
                 held = false;
+                queued_at = 0; /* a queued SetTx taken makes this one CMD_FAIL: nothing changes */
+                run_queued = false;
                 continue;
             }
         }
@@ -284,6 +337,11 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
             lr20xx_delay_us(2);
     }
 
+    if (c->learned) {
+        c->learned[0] = after_pin;
+        c->learned[1] = after_queued;
+        c->learned[2] = after_first;
+    }
 out:;
     uint8_t rx = 0, tx = 0;
     lr20xx_fifo_flags_peek(d, &rx, &tx);

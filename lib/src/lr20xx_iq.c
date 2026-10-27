@@ -551,7 +551,13 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
             .irq_pin = pin,
             .cut_end = tx->streamed && tx->mode != LR20XX_TX_CW,
             .stop = tx->stop,
+            .learned = iq->tx_learned,
         };
+        const uint32_t key = (uint32_t)tx->mode << 24 ^ tx->rate;
+        if (iq->tx_learned_for != key) {
+            iq->tx_learned[0] = iq->tx_learned[1] = iq->tx_learned[2] = -1;
+            iq->tx_learned_for = key;
+        }
         rf_hold_tx(iq, hz, true);
         e = lr20xx_tx_stream(iq->dev, &c, pad_pull, &pad, stats);
         rf_hold_tx(iq, hz, false);

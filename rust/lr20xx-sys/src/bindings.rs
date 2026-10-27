@@ -150,6 +150,7 @@ pub struct lr20xx_tx_stream_cfg_t {
     pub irq_pin: bool,
     pub cut_end: bool,
     pub stop: *const bool,
+    pub learned: *mut ::core::ffi::c_int,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -165,6 +166,8 @@ pub struct lr20xx_tx_stream_stats_t {
     pub restart_us: u32,
     pub gap_us: u32,
     pub done_level: ::core::ffi::c_int,
+    pub queued: ::core::ffi::c_uint,
+    pub refused: ::core::ffi::c_uint,
     pub starved: ::core::ffi::c_uint,
     pub cut: bool,
     pub stopped: bool,
@@ -301,6 +304,8 @@ pub struct lr20xx_iq_t {
     pub anchor_us: i64,
     pub anchor_level: i32,
     pub reckon_n: u8,
+    pub tx_learned: [::core::ffi::c_int; 3usize],
+    pub tx_learned_for: u32,
     pub stats: lr20xx_iq_stats_t,
     pub error: [::core::ffi::c_char; 128usize],
     pub buf: [u8; 1028usize],
@@ -1413,6 +1418,7 @@ unsafe extern "C" {
     pub fn lr20xx_wait_irq(dev: *mut lr20xx_t, timeout_ms: ::core::ffi::c_int) -> bool;
     pub fn lr20xx_has_irq(dev: *const lr20xx_t) -> bool;
     pub fn lr20xx_irq_pin(dev: *mut lr20xx_t) -> ::core::ffi::c_int;
+    pub fn lr20xx_busy_pin(dev: *mut lr20xx_t) -> ::core::ffi::c_int;
     pub fn lr20xx_tx_stream(
         dev: *mut lr20xx_t,
         cfg: *const lr20xx_tx_stream_cfg_t,

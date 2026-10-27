@@ -95,9 +95,9 @@ burst goes past it:
 - `freq`: ±127 counts of `tx_fdev` / 64, ±4.06 kHz at the default 2048: raise `tx_fdev` for more.
 - `phase_step`: ±127 / 128 of the rate.
 
-A burst goes out as runs back to back, with a dip on air between them (R3.15, R3.44, R3.45): about 85 µs (iq_polar)
-or 105–135 µs (iq_phase) on a board whose IRQ pin is wired (the W12), up to 0.5 ms without one. I/Q runs are at
-most 32 767 samples (R3.43), the others 65 535.
+A burst goes out as runs back to back, with a dip on air between them (R3.15, R3.44, R3.45, R3.47): on a board whose
+IRQ pin is wired (the W12), about 60 µs for iq_polar and 80 µs for the other modes, up to 0.5 ms without one. I/Q
+runs are at most 32 767 samples (R3.43), the others 65 535.
 
 ## A USB bridge on Linux
 
@@ -155,8 +155,8 @@ kS/s int16 and 576 kS/s int8 past that link (`firmware/README.md`).
 Transmit on the W12 from Linux, against the bench's receiver a room away (915 MHz, 0 dBm; 461.4625 MHz through the
 board's 915 MHz filter at 22 dBm): every mode at 48–125 kS/s, tones where they belong inside the mode's limit (the
 carrier on frequency with the board's ppm set), halved past it (R3.25), images at the rate (R3.26); bursts of 1–5 s
-at 48–125 kS/s their exact length, with seams of about 85 µs between runs (R3.45). Not yet: the local backend (it needs a chip on a Linux
-board's SPI bus).
+at 48–125 kS/s their exact length, with seams of 60–80 µs between runs (R3.47). Not yet: the local backend (it needs
+a chip on a Linux board's SPI bus).
 
 From Python, SoapySDR 0.8.1 on ARM (Raspberry Pi OS / Debian 12, an Apple Silicon Mac) loses a dict's values in
 `SoapySDR.Device({...})` ([SoapySDR#472](https://github.com/pothosware/SoapySDR/issues/472), fixed in 0.9.0);

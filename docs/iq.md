@@ -461,6 +461,18 @@ Measured on a W12 (ROM 1.24) on 2026-10-24 with the driver's packet API (`lr20xx
   125 kS/s (5 MB, over twice the 2 MB ring) went out over USB with the FIFO never empty; key-up came 71 ms after the
   first TX_DATA (whole-burst buffering: about 1.5 s for 5 s). Refills held back near a run's end (R3.45) only while
   the run's last byte is already in the FIFO: a run that still needs bytes can't end, and holding them stalls it.
+- **R3.47** SetTx ahead of TX_DONE (W12, ROM 1.24, 2026-10-26): the chip takes the next run's SetTx in the last
+  45–60 µs before a run's TX_DONE, and starts that run as soon as the one before ends, without the host's 25–30 µs
+  from the pin's edge to SetTx. Sent earlier it answers CMD_FAIL, holds BUSY about 82 µs, and the next run starts
+  50 µs or more later than it would have: worse than not trying. BUSY isn't high before TX_DONE, so it can't mark
+  the moment. TX_DONE's delay past a run's length from its start (its SetTx, or the TX_DONE before for one queued
+  this way) is steady for a setup, ±11 µs: about 78 µs for iq_polar, 139 µs for iq_phase, 145 µs for freq at
+  125 kS/s; the first run's (from standby) is longer. So the stream learns the delay for each way a run starts,
+  sends SetTx 35–45 µs ahead of the predicted TX_DONE (10 µs later after a refusal), checks the chip is in TX at the
+  edge, and sends SetTx then if not; lr20xx_iq keeps what it learned for the next burst with the same mode and rate.
+  Seams on air, 96 kS/s: 59–65 µs below −10 dB for iq_polar (was 81–92), 80–82 µs for iq_phase (was 102–135),
+  81 µs for freq and phase_step (was 102–109). Over about 320 restarts at 125 and 250 kS/s: none refused, 70–100%
+  of each burst's restarts queued (the rest on the pin).
 ## 4. Not known
 
 - The meaning of the route payload's other bytes, and of sources other than the one used (byte 5 = 0x0A).

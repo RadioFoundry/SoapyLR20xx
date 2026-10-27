@@ -805,9 +805,9 @@ int bridge_status_json(char *buf, size_t n)
     const lr20xx_tx_stream_stats_t *t = &B.job.stats;
     return k + snprintf(buf + k, n - k,
                         ",\"tx\":{\"result\":%d,\"runs\":%d,\"refills\":%u,\"restart_us\":%" PRIu32
-                        ",\"gap_us\":%" PRIu32 ",\"done_level\":%d,\"flags\":%u,\"sent\":%u,\"starved\":%u,"
+                        ",\"gap_us\":%" PRIu32 ",\"done_level\":%d,\"flags\":%u,\"sent\":%u,\"starved\":%u,\"queued\":%u,\"refused\":%u,"
                         "\"cut\":%d,\"stopped\":%d,\"key_ms\":%lld}",
                         (int)B.job.e, t->runs, t->refills, t->restart_us, t->gap_us, t->done_level, t->tx_flags,
-                        (unsigned)t->sent, t->starved, t->cut, t->stopped,
+                        (unsigned)t->sent, t->starved, t->queued, t->refused, t->cut, t->stopped,
                         (long long)(B.tx_first_us && t->key_us ? (t->key_us - B.tx_first_us) / 1000 : -1));
 }

@@ -87,6 +87,8 @@ bool lr20xx_wait_irq(lr20xx_t *dev, int timeout_ms);
 bool lr20xx_has_irq(const lr20xx_t *dev);
 /* The IRQ pin's level now (1 or 0), -1 with no pin: a GPIO read, no SPI. */
 int lr20xx_irq_pin(lr20xx_t *dev);
+/* The BUSY pin: 1 high, 0 low. */
+int lr20xx_busy_pin(lr20xx_t *dev);
 
 /* ── Transmit (lr20xx_tx.h sets a mode up; docs/iq.md section 3) ── */
 
@@ -112,6 +114,9 @@ typedef struct {
     bool cut_end;           /* the data may end inside a run: that run is cut (SetStandby) once the FIFO is empty,
                              * not padded out */
     const volatile bool *stop; /* set: SetStandby at once, the rest dropped (NULL: none) */
+    int *learned;           /* irq_pin: TX_DONE's delay past a run's length for runs started on the pin, queued, and
+                             * the first (from standby), us (-1: not known), carried from one call to the next with
+                             * the same setup (NULL: learned afresh, R3.47) */
 } lr20xx_tx_stream_cfg_t;
 
 typedef struct {
@@ -125,17 +130,20 @@ typedef struct {
     uint32_t restart_us;    /* the longest from a TX_DONE seen to the next run's SetTx sent */
     uint32_t gap_us;        /* the longest between two looks at the chip: what the FIFO has to cover */
     int done_level;         /* the fewest bytes in the FIFO at a TX_DONE between runs (-1: none) */
+    unsigned queued;        /* runs started by a SetTx sent ahead of the run before's TX_DONE (R3.47) */
+    unsigned refused;       /* such SetTx refused (too early): the run started at TX_DONE */
     unsigned starved;       /* level reads that found the FIFO empty while the data hadn't ended: the pull fell
                              * behind (the chip held its last sample, R3.13) */
     bool cut;               /* the last run was cut when its data ran out (cfg.cut_end) */
     bool stopped;           /* cfg.stop ended it */
 } lr20xx_tx_stream_stats_t;
 
-/* Clear the TX FIFO, prefill it from pull, key up with cfg.start, keep the FIFO topped up, and on each TX_DONE send
- * cfg.start again until the data ends (back-to-back runs: a seam between them, R3.15, R3.44, R3.45). The mode must
- * be set up first (lr20xx_tx_frames). Runs in the calling thread, sleeping between refills (lr20xx_sleep_us): give
- * it a priority that keeps the FIFO fed. LR20XX_ERR_INVALID_RESPONSE with stats.early for R3.17's early end; LR20XX_ERR_TIMEOUT past max_ms or on
- * the chip's own timeout. On an error the chip is put in standby if it's still in TX. */
+/* Clear the TX FIFO, prefill it from pull, key up with cfg.start, keep the FIFO topped up, and start each next run
+ * with cfg.start until the data ends (back-to-back runs: a seam between them, R3.15, R3.44, R3.45; with the IRQ pin,
+ * sent just ahead of TX_DONE, R3.47). The mode must be set up first (lr20xx_tx_frames). Runs in the calling thread,
+ * sleeping between refills (lr20xx_sleep_us): give it a priority that keeps the FIFO fed.
+ * LR20XX_ERR_INVALID_RESPONSE with stats.early for R3.17's early end; LR20XX_ERR_TIMEOUT past max_ms or on the
+ * chip's own timeout. On an error the chip is put in standby if it's still in TX. */
 lr20xx_err_t lr20xx_tx_stream(lr20xx_t *dev, const lr20xx_tx_stream_cfg_t *cfg, lr20xx_tx_pull_t pull, void *ctx,
                               lr20xx_tx_stream_stats_t *stats);
 

@@ -86,6 +86,12 @@ sent) when the burst's first samples hadn't reached the device in time. Measured
 20 ms ahead over USB (30 ms while receiving at 125 kS/s), and 100 ms or more over Wi-Fi, whose delay varies. A
 bridge from before timed bursts refuses one (`SOAPY_SDR_NOT_SUPPORTED`).
 
+While a burst waits for its time or goes out, the other calls work as usual (receiving, `getHardwareTime`, settings).
+`deactivateStream` or `closeStream` on the TX stream from another thread aborts it: a timed burst not yet started
+leaves reception alone, the blocked `writeStream` returns, and `readStreamStatus` gives `SOAPY_SDR_STREAM_ERROR`.
+`closeStream` waits for the stream's calls in other threads to return before freeing it; a `readStream` waiting
+for samples returns at its timeout.
+
 | `tx_mode` | Sent | |
 |---|---|---|
 | `iq_polar` (default) | int8 I/Q, phase and magnitude | `lr20xx_polar_iq8`, magnitudes under `polar_rmin` (0.2) pushed out to it (R3.27) |

@@ -465,6 +465,12 @@ static size_t pad_pull(void *ctx, uint8_t *buf, size_t max)
     return n;
 }
 
+bool lr20xx_iq_tx_calibrates(const lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx)
+{
+    const double hz = tx->center_hz > 0 ? tx->center_hz : iq->cfg.center_hz;
+    return iq->cal_word != lr20xx_calib_fe_word((uint32_t)lrint(hz), hf(hz));
+}
+
 lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20xx_tx_pull_t pull, void *ctx,
                                 lr20xx_tx_stream_stats_t *stats)
 {
@@ -499,8 +505,9 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
     const lr20xx_tx_setup_t s = {
         .mode = tx->mode,
         .freq_hz = lr20xx_freq_corrected(hz, ppm),
-        /* R3.16: no CalibFE where the receive session calibrated the same cell */
-        .calib_fe = !(receiving && iq->cal_word == lr20xx_calib_fe_word(cal_hz, hf(hz))),
+        /* R3.16: no CalibFE where the chip was last calibrated at the same cell (a receive session, or a
+         * transmission before) and not reset since */
+        .calib_fe = iq->cal_word != lr20xx_calib_fe_word(cal_hz, hf(hz)),
         .standby_first = true,
         .power_code = lr20xx_tx_power_code(tx->power_dbm),
         .ramp_code = 4,
@@ -521,6 +528,8 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
     lr20xx_err_t e = LR20XX_OK;
     for (int i = 0; i < nf && e == LR20XX_OK; i++)
         e = cmd(iq, frames[i], lens[i]);
+    if (s.calib_fe)
+        iq->cal_word = e == LR20XX_OK ? lr20xx_calib_fe_word(cal_hz, hf(hz)) : 0;
     if (e == LR20XX_OK)
         e = cmd(iq, f, lr20xx_cmd_clear_fifo_flags(f, 0, 0x3F));
     if (e == LR20XX_OK)
@@ -570,7 +579,7 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
     if (receiving) {
         iq->gap = true;
         iq->in_session = false;
-        lr20xx_err_t r = session_start(iq, iq->cal_word == lr20xx_calib_fe_word(cal_hz, hf(hz)));
+        lr20xx_err_t r = session_start(iq, !s.calib_fe); /* calibrated elsewhere: again at the center */
         if (r != LR20XX_OK && e == LR20XX_OK)
             e = r;
     }

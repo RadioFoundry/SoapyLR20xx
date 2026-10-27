@@ -70,22 +70,29 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
         goto out;
     st->sent = n;
     st->ready_us = lr20xx_now_us();
+    /* a timed start: the SetTx's frame takes some us to go (BUSY, the SPI): started that much early, as the last
+     * one took, so it ends (the chip keys up) at the time */
+    static int32_t settx_us = 30; /* the W12 at 16 MHz: 24-35 */
+    const int64_t at = c->at_us ? c->at_us - settx_us : 0;
     if (c->at_us) {
         /* a timed start: asleep until just before it (a tick's sleep can end early, a timer's late), the last
          * 30 us spun (lr20xx_sleep_us spins that short) */
         int64_t now = lr20xx_now_us();
-        if (now > c->at_us + LR20XX_TX_LATE_US) {
+        if (now > at + LR20XX_TX_LATE_US) {
             st->late = true;
             st->sent = 0;
             lr20xx_write(d, f, lr20xx_cmd(f, LR20XX_CLEAR_TX_FIFO));
             goto out;
         }
-        for (; now < c->at_us; now = lr20xx_now_us())
-            lr20xx_sleep_us((uint32_t)(c->at_us - now >= 60 ? c->at_us - now - 30 : c->at_us - now > 25 ? 25 : c->at_us - now));
+        for (; now < at; now = lr20xx_now_us())
+            lr20xx_sleep_us((uint32_t)(at - now >= 60 ? at - now - 30 : at - now > 25 ? 25 : at - now));
     }
+    const int64_t sending = lr20xx_now_us();
     if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)
         goto out;
     st->key_us = lr20xx_now_us();
+    if (c->at_us && st->key_us - sending < 200)
+        settx_us = (int32_t)(st->key_us - sending);
 
     /* The FIFO's level is read when a refill may be due, and reckoned from the rate in between. With the IRQ pin,
      * TX_DONE is a GPIO read: the loop sleeps until a refill or the run's end is near, then watches the pin, and

@@ -9,6 +9,8 @@
  * bytes, or a USB port the host has let go, ends one. The console and the log must be on another port: their text
  * would land in the middle of the frames.
  */
+#include <string.h>
+
 #include "bridge.h"
 #include "esp_attr.h"
 #include "esp_log.h"
@@ -106,9 +108,22 @@ bool serial_port_connected(void) { return true; }
 
 static int serial_send(bridge_link_t *l, const uint8_t *data, size_t n) { return serial_port_write(data, n); }
 
+/* What the host sent, read ahead by serial_pending (the USB Serial/JTAG driver can't say what it holds) */
+static uint8_t stash[512];
+static size_t stash_len;
+
+static bool serial_pending(bridge_link_t *l)
+{
+    if (!stash_len) {
+        const int n = serial_port_read(stash, sizeof stash, 0);
+        stash_len = n > 0 ? (size_t)n : 0;
+    }
+    return stash_len > 0;
+}
+
 static void serial_task(void *arg)
 {
-    static uint8_t in[512];
+    static uint8_t in[4096];
     bool up = false;
     for (;;) {
         const bool now = serial_port_connected();
@@ -120,7 +135,16 @@ static void serial_task(void *arg)
                 bridge_link_open(&serial_link);
             ESP_LOGI(TAG, "host %s", up ? "here" : "gone");
         }
-        int n = serial_port_read(in, sizeof in, bridge_streaming() ? 0 : 20);
+        int n = 0;
+        if (stash_len) {
+            memcpy(in, stash, stash_len);
+            n = (int)stash_len;
+            stash_len = 0;
+            const int k = serial_port_read(in + n, sizeof in - (size_t)n, 0);
+            n += k > 0 ? k : 0;
+        } else {
+            n = serial_port_read(in, sizeof in, bridge_streaming() ? 0 : 20);
+        }
         if (!up) {
             if (n <= 0)
                 vTaskDelay(pdMS_TO_TICKS(20));
@@ -138,5 +162,6 @@ void link_serial_start(void)
 {
     serial_port_init();
     serial_link.send = serial_send;
+    serial_link.pending = serial_pending;
     xTaskCreatePinnedToCore(serial_task, "link_serial", 6144, NULL, 10, NULL, LINK_CORE);
 }

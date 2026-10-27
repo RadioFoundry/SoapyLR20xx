@@ -81,8 +81,9 @@ bridge buffers the whole burst first, and HELLO's `tx_max_samples` is the most i
 burst and resumes after it, with a gap.
 
 Time: RX_DATA's `t_us`, TIME's answer, `at_us` and `key_us` are one clock, the bridge's since it booted. With
-capability 0x10 (TIME), a TX_BEGIN `at_us` other than 0 keys up then: reception goes on until 10 ms before, the FIFO
-is filled, and the SetTx goes out at `at_us` (the signal follows by the chip's start-up). Ready more than 100 us past
+capability 0x10 (TIME), a TX_BEGIN `at_us` other than 0 keys up then: it starts on its first TX_DATA, reception
+goes on until 4.5 ms before (18 ms when it calibrates first, R3.48), the FIFO is filled, and the SetTx's frame
+ends at `at_us` (the signal follows by the chip's start-up). Ready more than 100 us past
 it (`LR20XX_TX_LATE_US`), nothing is sent: TX_COMMIT answers with `late` 1 and `key_us` 0. `key_us` is when the
 first SetTx went out. TX_BEGIN's `at_us` and TX_COMMIT's `key_us` and `late` came with TIME: a shorter TX_BEGIN
 (37 bytes) is untimed, a shorter answer (11 bytes) has them 0.

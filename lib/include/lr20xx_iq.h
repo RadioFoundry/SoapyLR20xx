@@ -105,7 +105,8 @@ typedef struct {
     bool in_session, have_cfg;
     bool by_level;             /* reading by the FIFO level, not waiting for the IRQ */
     bool gap;                  /* a loss not yet told to the sink */
-    uint16_t cal_word;         /* the CalibFE cell the session calibrated (0: none) */
+    uint16_t cal_word;         /* the CalibFE cell last calibrated, by a session or a transmission (0: none, or reset
+                                * since) */
     uint8_t carry_n;           /* bytes of a sample read and not yet delivered (0 or 2) */
     uint32_t since_flags;
     /* the FIFO level reckoned from the rate between level queries: anchor_level bytes at anchor_us, less what's
@@ -159,6 +160,9 @@ typedef struct {
  * calibrated the frequency, R3.16), the mode set up, the samples pulled and streamed in runs (R3.15), then the
  * session resumed. pull gives FIFO bytes in the mode's format (lr20xx_tx_sample_bytes); past its end the last run
  * is filled with zeros, or (tx->streamed) cut. */
+/* Whether lr20xx_iq_transmit will run CalibFE first (about 10.6 ms, R3.16): the chip isn't calibrated at its cell. */
+bool lr20xx_iq_tx_calibrates(const lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx);
+
 lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20xx_tx_pull_t pull, void *ctx,
                                 lr20xx_tx_stream_stats_t *stats);
 

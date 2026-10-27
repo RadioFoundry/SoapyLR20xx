@@ -20,6 +20,9 @@ void bridge_init(void);
 typedef struct bridge_link {
     /* Send all of n bytes; < 0 if the connection failed. */
     int (*send)(struct bridge_link *l, const uint8_t *data, size_t n);
+    /* Whether the host has sent something not yet read (NULL: not known): the pump's waits for samples end then,
+     * so a request isn't held behind a frame filling */
+    bool (*pending)(struct bridge_link *l);
     void *ctx;
     lr20xx_link_parser_t parser;
     uint8_t out[LR20XX_LINK_HEADER + LR20XX_LINK_MAX_PAYLOAD];

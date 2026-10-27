@@ -21,6 +21,17 @@ static const char *TAG = "link";
 
 EXT_RAM_BSS_ATTR static bridge_link_t tcp_link;
 
+/* The host has sent something not yet read. */
+static bool tcp_pending(bridge_link_t *l)
+{
+    const int fd = (int)(intptr_t)l->ctx;
+    fd_set r;
+    FD_ZERO(&r);
+    FD_SET(fd, &r);
+    struct timeval tv = {0, 0};
+    return select(fd + 1, &r, NULL, NULL, &tv) > 0;
+}
+
 static int tcp_send(bridge_link_t *l, const uint8_t *data, size_t n)
 {
     int fd = (int)(intptr_t)l->ctx;
@@ -59,7 +70,7 @@ static void tcp_task(void *arg)
         vTaskDelete(NULL);
     }
     ESP_LOGI(TAG, "listening on TCP %d", LR20XX_LINK_TCP_PORT);
-    static uint8_t in[1460];
+    static uint8_t in[4096];
     int fd = -1;
     for (;;) {
         fd_set r;
@@ -81,6 +92,7 @@ static void tcp_task(void *arg)
                 setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &st, sizeof st);
                 setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
                 tcp_link.send = tcp_send;
+                tcp_link.pending = tcp_pending;
                 tcp_link.ctx = (void *)(intptr_t)fd;
                 bridge_link_open(&tcp_link);
                 ESP_LOGI(TAG, "host %s", inet_ntoa(peer.sin_addr));
@@ -94,14 +106,14 @@ static void tcp_task(void *arg)
             }
         }
         if (fd >= 0) {
-            /* up to a few frames of samples, then back to the host's input */
+            /* up to a few frames of samples, then back to the host's input (at once if it has sent some) */
             for (int i = 0; i < 4; i++) {
                 int p = bridge_link_pump(&tcp_link, i ? 0 : 5);
                 if (p < 0) {
                     client_close(&fd);
                     break;
                 }
-                if (!p)
+                if (!p || tcp_pending(&tcp_link))
                     break;
             }
         }

@@ -6,6 +6,7 @@
 // gets show whether any went missing or came twice.
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "lr20xx_iq.h"
@@ -660,12 +661,32 @@ static void transmit_front_end(void)
     CHECK(e == LR20XX_OK && key > 0 && held > 0 && back > key, "the front end held in TX, then its table (%d %d %d)",
           held, key, back);
     CHECK(st.done_level == -1 && st.restart_us == 0, "one run: no restarts");
+    CHECK(find_op(LR20XX_CALIB_FE, 0) >= 0, "not receiving: calibrated first");
 
-    /* timed: keyed up at the time asked; past it, nothing sent */
-    tx.at_us = F.now_us + 50000;
+    /* the same cell again: the calibration kept; another: calibrated there */
+    CHECK(!lr20xx_iq_tx_calibrates(&iq, &tx), "known calibrated");
+    M.n_ops = 0;
     pull_n = 4800;
     e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
-    CHECK(e == LR20XX_OK && !st.late && st.key_us >= tx.at_us && st.key_us - tx.at_us < 20 && st.runs == 1,
+    CHECK(e == LR20XX_OK && find_op(LR20XX_CALIB_FE, 0) < 0, "again: no CalibFE");
+    tx.center_hz = 868e6;
+    CHECK(lr20xx_iq_tx_calibrates(&iq, &tx), "another cell: to calibrate");
+    M.n_ops = 0;
+    pull_n = 4800;
+    e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    CHECK(e == LR20XX_OK && find_op(LR20XX_CALIB_FE, 0) >= 0, "another cell: CalibFE");
+    tx.center_hz = 915e6;
+    pull_n = 4800;
+    lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+
+    /* timed: keyed up at the time asked (the second time: the SetTx frame's time learned from the first); past it,
+     * nothing sent */
+    for (int i = 0; i < 2; i++) {
+        tx.at_us = F.now_us + 50000;
+        pull_n = 4800;
+        e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    }
+    CHECK(e == LR20XX_OK && !st.late && llabs(st.key_us - tx.at_us) < 3 && st.runs == 1,
           "timed: keyed %lld us after the time asked", (long long)(st.key_us - tx.at_us));
     M.n_ops = 0;
     tx.at_us = F.now_us - 1000;

@@ -473,6 +473,12 @@ Measured on a W12 (ROM 1.24) on 2026-10-24 with the driver's packet API (`lr20xx
   Seams on air, 96 kS/s: 59–65 µs below −10 dB for iq_polar (was 81–92), 80–82 µs for iq_phase (was 102–135),
   81 µs for freq and phase_step (was 102–109). Over about 320 restarts at 125 and 250 kS/s: none refused, 70–100%
   of each burst's restarts queued (the rest on the pin).
+- **R3.48** Timed key-up and turnaround (W12, ROM 1.24, 2026-10-26). A transmission's set-up to a filled FIFO takes
+  2.8 ms from a receive session at the same cell and 12.6 ms with a CalibFE first (R3.16's 10.6 ms). A CalibFE
+  holds through transmissions while nothing resets the chip, so a burst at the cell last calibrated, receiving or
+  not, needs none: 2.7 ms. The SetTx frame takes 24–35 µs (BUSY, the SPI at 16 MHz): sent that much ahead, timed
+  bursts key up within ±5 µs of the time asked, on the bridge's clock. Receiving at 125 kS/s, a 100 ms burst
+  started 4.5 ms ahead left a 106–107 ms hole in the samples: about 2 ms to the first samples back.
 ## 4. Not known
 
 - The meaning of the route payload's other bytes, and of sources other than the one used (byte 5 = 0x0A).

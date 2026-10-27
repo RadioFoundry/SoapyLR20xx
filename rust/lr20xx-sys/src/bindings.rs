@@ -1510,6 +1510,7 @@ unsafe extern "C" {
         wait_ms: ::core::ffi::c_int,
     ) -> ::core::ffi::c_int;
     pub fn lr20xx_iq_stop(iq: *mut lr20xx_iq_t);
+    pub fn lr20xx_iq_tx_calibrates(iq: *const lr20xx_iq_t, tx: *const lr20xx_iq_tx_t) -> bool;
     pub fn lr20xx_iq_transmit(
         iq: *mut lr20xx_iq_t,
         tx: *const lr20xx_iq_tx_t,

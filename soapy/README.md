@@ -79,10 +79,12 @@ converted and sent as it comes: the bridge keys up once it has 0.2 s of samples 
 longer than it buffers (HELLO's `tx_max_samples`).
 
 A burst's first `writeStream` with `SOAPY_SDR_HAS_TIME` starts it at that time (`getHardwareTime`'s clock, the same
-as the receive timestamps'): reception goes on until 10 ms before, and the chip keys up at the time (the signal
-follows by its start-up, about 60-70 us). `readStreamStatus` gives the key-up's time with `SOAPY_SDR_HAS_TIME`, or
-`SOAPY_SDR_TIME_ERROR` (nothing sent) when the burst wasn't ready by then: write it at least 10 ms ahead, plus the
-link's delay. A bridge from before timed bursts refuses one (`SOAPY_SDR_NOT_SUPPORTED`).
+as the receive timestamps'): reception goes on until 4.5 ms before (18 ms when the chip must calibrate first: a new
+frequency, or after receiving stopped), and the chip keys up within a few us of the time (the signal follows by its
+start-up). `readStreamStatus` gives the key-up's time with `SOAPY_SDR_HAS_TIME`, or `SOAPY_SDR_TIME_ERROR` (nothing
+sent) when the burst's first samples hadn't reached the device in time. Measured on the W12, write it at least
+20 ms ahead over USB (30 ms while receiving at 125 kS/s), and 100 ms or more over Wi-Fi, whose delay varies. A
+bridge from before timed bursts refuses one (`SOAPY_SDR_NOT_SUPPORTED`).
 
 | `tx_mode` | Sent | |
 |---|---|---|

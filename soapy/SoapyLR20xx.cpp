@@ -103,6 +103,7 @@ struct Device::TxStream {
     std::atomic<bool> open{false};
     std::atomic<bool> committing{false}; /* TX_COMMIT waits for the burst to go out */
     std::atomic<bool> closing{false};
+    std::atomic<bool> aborted{false}; /* deactivateStream aborted the burst: its error is no news */
     int mode = 0;
     double rate = 0;
     uint64_t n = 0;                          /* samples written */
@@ -276,6 +277,7 @@ int Device::deactivateStream(SoapySDR::Stream *s, const int, const long long)
     } else if ((void *)s == (void *)tx_ && (tx_->open || tx_->committing)) {
         /* a burst not ended, or one waiting on its time or going out (writeStream in another thread): aborted, and
          * that writeStream returns with STREAM_ERROR in readStreamStatus */
+        tx_->aborted = true;
         try {
             b_->tx_abort();
         } catch (const std::exception &e) {
@@ -403,6 +405,7 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
             return SOAPY_SDR_STREAM_ERROR;
         }
         t->open = true;
+        t->aborted = false;
         t->mode = tx_mode_;
         t->rate = tx_rate_;
         t->n = 0;
@@ -556,7 +559,7 @@ void Device::tx_finish(TxStream &t)
         else if (r.early)
             status = SOAPY_SDR_STREAM_ERROR;
     } catch (const std::exception &e) {
-        if (!t.closing) /* (aborted on purpose: no news) */
+        if (!t.closing && !t.aborted) /* (aborted on purpose: no news) */
             SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
         status = SOAPY_SDR_STREAM_ERROR;
     }

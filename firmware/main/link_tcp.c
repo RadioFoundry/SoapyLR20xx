@@ -12,6 +12,7 @@
 #include "links.h"
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -20,6 +21,7 @@
 static const char *TAG = "link";
 
 EXT_RAM_BSS_ATTR static bridge_link_t tcp_link;
+static int listen_fd = -1;
 
 /* The host has sent something not yet read. */
 static bool tcp_pending(bridge_link_t *l)
@@ -32,18 +34,35 @@ static bool tcp_pending(bridge_link_t *l)
     return select(fd + 1, &r, NULL, NULL, &tv) > 0;
 }
 
+/* All of it sent, or -1: the host gone, 2 s with no room (a host that stopped reading), or a new host waiting to
+ * replace this one (a host killed mid-stream leaves its window full: the next one isn't kept waiting on it) */
 static int tcp_send(bridge_link_t *l, const uint8_t *data, size_t n)
 {
     int fd = (int)(intptr_t)l->ctx;
+    int64_t until = esp_timer_get_time() + 2000000;
     while (n) {
-        int k = send(fd, data, n, 0);
-        if (k < 0) {
-            if (errno == EINTR)
-                continue;
-            return -1; /* includes SO_SNDTIMEO: a host that stopped reading */
+        int k = send(fd, data, n, MSG_DONTWAIT);
+        if (k > 0) {
+            data += k;
+            n -= (size_t)k;
+            until = esp_timer_get_time() + 2000000;
+            continue;
         }
-        data += k;
-        n -= (size_t)k;
+        if (k < 0 && errno == EINTR)
+            continue;
+        if (k == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
+            return -1;
+        const int64_t left = until - esp_timer_get_time();
+        if (left <= 0)
+            return -1;
+        fd_set r, w;
+        FD_ZERO(&r);
+        FD_ZERO(&w);
+        FD_SET(fd, &w);
+        FD_SET(listen_fd, &r);
+        struct timeval tv = {(time_t)(left / 1000000), (suseconds_t)(left % 1000000)};
+        if (select((fd > listen_fd ? fd : listen_fd) + 1, &r, &w, NULL, &tv) > 0 && FD_ISSET(listen_fd, &r))
+            return -1;
     }
     return 0;
 }
@@ -65,6 +84,7 @@ static void tcp_task(void *arg)
     int one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(LR20XX_LINK_TCP_PORT), .sin_addr.s_addr = 0};
+    listen_fd = ls;
     if (bind(ls, (struct sockaddr *)&a, sizeof a) || listen(ls, 1)) {
         ESP_LOGE(TAG, "TCP port %d: %s", LR20XX_LINK_TCP_PORT, strerror(errno));
         vTaskDelete(NULL);
@@ -88,8 +108,6 @@ static void tcp_task(void *arg)
             if (c >= 0) {
                 client_close(&fd); /* the new host replaces the old */
                 fd = c;
-                struct timeval st = {2, 0};
-                setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &st, sizeof st);
                 setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
                 tcp_link.send = tcp_send;
                 tcp_link.pending = tcp_pending;

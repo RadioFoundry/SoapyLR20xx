@@ -83,7 +83,9 @@ burst and resumes after it, with a gap.
 TX_COMMIT is answered when the burst has gone out, and the bridge goes on meanwhile: RX_DATA, and the answers to
 other requests, which may come before TX_COMMIT's (match answers by `seq`). TX_ABORT then (or the host leaving)
 stops the burst, a timed one still waiting at once and with no gap in reception, and TX_COMMIT answers
-`LR20XX_ERR_INVALID_STATE`. A new TX_BEGIN is refused until TX_COMMIT has been answered. While a timed burst's ring
+`LR20XX_ERR_INVALID_STATE`. A new TX_BEGIN is refused until TX_COMMIT has been answered. The host needn't wait for
+TX_BEGIN's answer before its TX_DATA: the bridge takes frames in order and drops the data of a TX_BEGIN it refused
+(the module sends a burst's first 1 KB at once, which a timed burst starts on). While a timed burst's ring
 is full ahead of its time, the bridge stops reading the link but goes on sending RX_DATA.
 
 Time: RX_DATA's `t_us`, TIME's answer, `at_us` and `key_us` are one clock, the bridge's since it booted. With

@@ -70,6 +70,21 @@ measures what a link carries out of the bridge with no samples behind it, `POST 
 frames of up to 4 KB, held up to 10 ms to fill, and the S3's Wi-Fi sends no A-MPDUs (a lost subframe stalled TCP for
 a second; `sdkconfig.defaults.esp32s3`).
 
+Where the board's antenna sits matters more than the signal's strength says. On 2026-10-26, W12 on the bench,
+channel 11, receiving 125 kS/s int16 for 30-60 s:
+
+| Antenna | `wifi_rssi` | A-MPDU out off (as built) | A-MPDU out on |
+|---|---|---|---|
+| first place | −45 dBm | 85 % delivered | 98-100 % |
+| moved toward the access point | −45 dBm | | about 25 %, stalls up to 2.9 s |
+| moved again | −52 dBm | 100 %, and 250 kS/s 99 % | about 5 % |
+
+The best-placed antenna gave the strongest signal and the worst link: likely too strong a signal (one receiver
+overloaded), though the runs were few. A-MPDUs helped in one place and broke the link in another, so they stay off.
+A slow or stalled link can hold a command's answer behind seconds of samples already sent: the module waits 10 s for
+answers while receiving (3 s otherwise). If Wi-Fi delivers less than it should, move the board or its antenna before
+anything else, and compare with `GET /api/speedtest`.
+
 ## Settings (menuconfig, "LR20xx bridge")
 
 | Option | Default (W12) | What |

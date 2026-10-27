@@ -151,9 +151,14 @@ public:
             failure_.clear();
         }
         request(LR20XX_CMD_RX_START, nullptr, 0);
+        receiving_ = true;
     }
 
-    void rx_stop() override { request(LR20XX_CMD_RX_STOP, nullptr, 0); }
+    void rx_stop() override
+    {
+        request(LR20XX_CMD_RX_STOP, nullptr, 0);
+        receiving_ = false;
+    }
 
     void set_gain(int step) override
     {
@@ -183,7 +188,7 @@ public:
         }
         /* the answer comes once it has gone out: its length plus a margin */
         const double secs = b.rate ? (double)b.samples / b.rate : 0;
-        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, secs + wait_s(b) + 5);
+        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, secs + wait_s(b) + (receiving_ ? 10 : 5));
         lr20xx_link_tx_result_t r{};
         if (!lr20xx_link_get_tx_result(a.data(), a.size(), &r))
             throw Error(-1, "LR20xx: short TX_COMMIT answer");
@@ -224,7 +229,8 @@ public:
             return Backend::tx_commit();
         /* the answer comes once it has gone out: at most all of it still to send, plus a margin */
         const double bps = (double)tx_b_.rate * (tx_b_.mode == LR20XX_TX_FREQ || tx_b_.mode == LR20XX_TX_PHASE_STEP ? 1 : 2);
-        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, (bps > 0 ? (double)tx_sent_ / bps : 0) + wait_s(tx_b_) + 5);
+        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0,
+                         (bps > 0 ? (double)tx_sent_ / bps : 0) + wait_s(tx_b_) + (receiving_ ? 10 : 5));
         lr20xx_link_tx_result_t r{};
         if (!lr20xx_link_get_tx_result(a.data(), a.size(), &r))
             throw Error(-1, "LR20xx: short TX_COMMIT answer");
@@ -323,8 +329,12 @@ private:
         }
     }
 
-    std::vector<uint8_t> request(uint16_t cmd, const void *args, size_t n, double timeout_s = 3.0)
+    /* timeout_s < 0: 3 s, or 10 s while receiving, when the answer queues behind the samples already sent and a
+     * stalled Wi-Fi link can hold them for seconds (a late answer is dropped by its seq) */
+    std::vector<uint8_t> request(uint16_t cmd, const void *args, size_t n, double timeout_s = -1)
     {
+        if (timeout_s < 0)
+            timeout_s = receiving_ ? 10.0 : 3.0;
         uint8_t f[LR20XX_LINK_HEADER + 64];
         uint16_t seq;
         {
@@ -468,6 +478,7 @@ private:
     int fd_;
     std::string where_;
     uint8_t caps_ = 0;
+    std::atomic<bool> receiving_{false};
     uint64_t tx_sent_ = 0; /* a streamed transmission's bytes so far */
     lr20xx_link_parser_t parser_;
     std::thread reader_;

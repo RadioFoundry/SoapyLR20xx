@@ -60,7 +60,8 @@ CS8's full scale is 32: the chip's int8 clips at −32..+31 (R2.26). CF32 is sca
 `readStream` gives each buffer its first sample's time (`SOAPY_SDR_HAS_TIME`) on the device's clock: the sample
 count from a time taken from the reads (each read's end bounds its last sample), so across a loss or a transmission
 the time jumps by about the samples missed (within a read's lateness, a few hundred us), and in between it follows
-the count. The loss itself is returned once as `SOAPY_SDR_OVERFLOW` before the samples after it.
+the count: one buffer's time to the next differs from the samples between by under a quarter of a sample (the
+device's and the chip's clocks drifting apart, corrected at most 200 ppm of the time between). The loss itself is returned once as `SOAPY_SDR_OVERFLOW` before the samples after it.
 `getHardwareTime` reads the device's clock (its time since boot, plus what `setHardwareTime` moved it by).
 
 Gain: one element, `LNA`, −8 to 53.5 dB in the chip's 13 steps (R2.25), set to the nearest; `setGainMode(true)` is

@@ -87,12 +87,14 @@ struct Device::RxStream {
     bool active = false;
     uint32_t rate_num = 1, rate_den = 1;
     /* The device's clock (ns) at sample index 0. Each chunk's t_us is when its read ended, so never before its last
-     * sample: base_ns is the lowest such bound, let rise slowly (the chip's sample clock and the device's drift
-     * apart by tens of ppm). After a loss (the index doesn't count the lost samples) it's set afresh from that one
-     * chunk, less a read's usual lateness past the bound (late_ns). The times given follow it from applied_ns, down
-     * by under a sample a chunk, so they never go back. */
+     * sample: base_ns is the lowest such bound over the last WINDOW_NS (win, a sliding minimum), which follows the
+     * chip's sample clock drifting from the device's (tens of ppm) without following the reads' jitter. After a loss
+     * (the index doesn't count the lost samples) it's set afresh from that one chunk, less a read's usual lateness
+     * past the bound (late_ns). The times given come from applied_ns, which moves toward base_ns by at most 200 ppm
+     * of a chunk's span, so the stream's times stay continuous to a fraction of a sample. */
     bool anchored = false;
     long double base_ns = 0, applied_ns = 0, late_ns = 0;
+    std::deque<std::pair<long double, long double>> win; /* (the chunk's t_us in ns, its bound), bounds rising */
     long double cur_ns = 0; /* the chunk being read: its first sample's time */
 };
 
@@ -312,19 +314,25 @@ int Device::readStream(SoapySDR::Stream *s, void *const *buffs, const size_t num
         const size_t n = r->cur.data.size() / (r->cur.format == 1 ? 2 : 4);
         const long double per = 1e9L * r->rate_den / r->rate_num;
         const long double bound = (long double)r->cur.t_us * 1000 - (long double)(r->cur.first + n) * per;
-        if (!r->anchored) {
-            r->base_ns = r->applied_ns = bound;
-            r->late_ns = 0;
-        } else if (r->cur.flags & LR20XX_LINK_GAP) {
-            r->base_ns = r->applied_ns = std::max(bound - r->late_ns, r->applied_ns);
+        const long double now_ns = (long double)r->cur.t_us * 1000;
+        constexpr long double WINDOW_NS = 250e6L;
+        if (!r->anchored || (r->cur.flags & LR20XX_LINK_GAP)) {
+            r->base_ns = r->applied_ns = r->anchored ? std::max(bound - r->late_ns, r->applied_ns) : bound;
+            if (!r->anchored)
+                r->late_ns = 0;
+            r->win.clear();
+            r->win.emplace_back(now_ns, r->base_ns);
         } else {
             r->late_ns += (std::max(bound - r->base_ns, 0.0L) - r->late_ns) / 16;
-            if (bound < r->base_ns)
-                r->base_ns = bound;
-            else
-                r->base_ns += std::min(bound - r->base_ns, (long double)n * per * 200e-6L);
-            r->applied_ns = r->base_ns >= r->applied_ns ? r->base_ns
-                                                        : r->applied_ns - std::min(r->applied_ns - r->base_ns, per * 0.9L);
+            while (!r->win.empty() && r->win.back().second >= bound)
+                r->win.pop_back();
+            r->win.emplace_back(now_ns, bound);
+            while (r->win.front().first < now_ns - WINDOW_NS)
+                r->win.pop_front();
+            r->base_ns = r->win.front().second;
+            const long double d = r->base_ns - r->applied_ns, slew = (long double)n * per * 200e-6L;
+            /* (far off, which a loss the bridge didn't flag could cause: at once) */
+            r->applied_ns = std::fabs(d) > 1e6L ? r->base_ns : r->applied_ns + std::max(-slew, std::min(slew, d));
         }
         r->anchored = true;
         r->cur_ns = r->applied_ns + (long double)r->cur.first * per;

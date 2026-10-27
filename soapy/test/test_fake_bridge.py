@@ -121,7 +121,8 @@ try:
     jumps = [s for s in steps if s > 1e6]
     check(len(jumps) >= 1 and all(1.6e6 < s < 2.5e6 for s in jumps), "the gaps' time in the timestamps (%s us)" %
           [round(s / 1000) for s in jumps])
-    check(all(abs(s) < 1e9 / rate or s > 1e6 for s in steps), "no other jumps: %s" % [round(s) for s in steps if not (abs(s) < 1e9 / rate or s > 1e6)])
+    # elsewhere continuous to a fraction of a sample (the reads' jitter doesn't show)
+    check(all(abs(s) < 0.25e9 / rate or s > 1e6 for s in steps), "no other jumps: %s" % [round(s) for s in steps if not (abs(s) < 0.25e9 / rate or s > 1e6)])
 
     # int8 through the converter
     sdr.writeSetting("iq_mode", "conv8")

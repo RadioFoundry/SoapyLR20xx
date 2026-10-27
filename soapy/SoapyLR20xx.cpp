@@ -278,6 +278,7 @@ int Device::deactivateStream(SoapySDR::Stream *s, const int, const long long)
         /* a burst not ended, or one waiting on its time or going out (writeStream in another thread): aborted, and
          * that writeStream returns with STREAM_ERROR in readStreamStatus */
         tx_->aborted = true;
+        tx_->open = false; /* the next write begins a new burst */
         try {
             b_->tx_abort();
         } catch (const std::exception &e) {
@@ -398,13 +399,22 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
             }
             b.at_us = std::max<long long>(1, std::llround((long double)(timeNs - time_offset_) / 1000));
         }
+        t->open = true; /* before TX_BEGIN: a closeStream from now on aborts it */
         try {
             b_->tx_begin(b);
         } catch (const std::exception &e) {
+            t->open = false;
             SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
             return SOAPY_SDR_STREAM_ERROR;
         }
-        t->open = true;
+        if (t->closing) { /* closed while it began: its abort may have gone first */
+            t->open = false;
+            try {
+                b_->tx_abort();
+            } catch (...) {
+            }
+            return SOAPY_SDR_STREAM_ERROR;
+        }
         t->aborted = false;
         t->mode = tx_mode_;
         t->rate = tx_rate_;
@@ -435,7 +445,7 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
                 t->buf.push_back(v);
             }
             if (streams || (end && i == numElems))
-                tx_flush(*t, end && i == numElems);
+                tx_flush(*t, end && i == numElems, i < numElems);
         } while (i < numElems);
     } catch (const std::exception &e) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
@@ -468,12 +478,12 @@ double Device::tx_freq_limit() const
 /* The samples written so far, converted to the transmit mode's and sent, with the last one converted before as
  * context (a phase to step from); iq_polar keeps a trailing dip back for the sample after it (its phase is drawn
  * across the dip), unless end. */
-void Device::tx_flush(TxStream &t, bool end)
+void Device::tx_flush(TxStream &t, bool end, bool more)
 {
     const bool iq = t.mode == LR20XX_TX_IQ_POLAR || t.mode == LR20XX_TX_IQ_PHASE;
     const double rmin = iq ? std::max(polar_rmin_, 0.2) : 0;
     size_t n = t.buf.size();
-    if (!end && t.mode == LR20XX_TX_IQ_POLAR && n < 4096) {
+    if (!end && t.mode == LR20XX_TX_IQ_POLAR && (more || n < 4096)) {
         while (n && std::abs(t.buf[n - 1]) < (float)polar_rmin_)
             n--;
     }

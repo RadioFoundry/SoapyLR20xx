@@ -579,7 +579,7 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
             return LR20XX_ERR_INVALID_SIZE;
         if (!tx_mode_ok(t.mode) || !t.rate)
             return LR20XX_ERR_NOT_SUPPORTED;
-        if (B.tx_started)
+        if (B.tx_started || B.commit_wait) /* (an aborted one's TX_COMMIT not answered yet) */
             return LR20XX_ERR_INVALID_STATE;
         const size_t sb = (size_t)lr20xx_tx_sample_bytes((lr20xx_tx_mode_t)t.mode);
         double p = t.power_dbm > B.board.b.tx_power_max ? B.board.b.tx_power_max : t.power_dbm;

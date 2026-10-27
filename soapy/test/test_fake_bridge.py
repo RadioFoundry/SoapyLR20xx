@@ -193,6 +193,14 @@ try:
         st = sdr.readStreamStatus(tx, timeoutUs=3000000)
         check(st.ret == SOAPY_SDR_TIME_ERROR, "late: %d" % st.ret)
 
+        # a burst left open (no END_BURST) and deactivated: the next write begins a new one, which goes out
+        r = sdr.writeStream(tx, [tb], n, 0, timeoutUs=1000000)
+        sdr.deactivateStream(tx)
+        sdr.activateStream(tx)
+        r = sdr.writeStream(tx, [tb], n, SOAPY_SDR_END_BURST, timeoutUs=1000000)
+        st = sdr.readStreamStatus(tx, timeoutUs=3000000)
+        check(r.ret == n and st.ret == 0, "a burst after one deactivated open: write %d, status %d" % (r.ret, st.ret))
+
         # a burst waiting 2 s for its time, its writer in another thread: deactivateStream aborts it (the writer
         # back at once, STREAM_ERROR in the status), and closeStream does too, freeing the stream once it's left
         res = {}

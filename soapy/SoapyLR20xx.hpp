@@ -77,19 +77,33 @@ public:
      * transmit(); a bridge that streams (LR20XX_LINK_CAP_TX_STREAM) takes them as they come. */
     virtual void tx_begin(const lr20xx_link_tx_begin_t &b)
     {
+        std::lock_guard<std::mutex> l(tx_m_);
         tx_b_ = b;
         tx_d_.clear();
     }
-    virtual void tx_data(const uint8_t *p, size_t n) { tx_d_.insert(tx_d_.end(), p, p + n); }
+    virtual void tx_data(const uint8_t *p, size_t n)
+    {
+        std::lock_guard<std::mutex> l(tx_m_);
+        tx_d_.insert(tx_d_.end(), p, p + n);
+    }
     virtual lr20xx_link_tx_result_t tx_commit()
     {
-        lr20xx_link_tx_begin_t b = tx_b_;
-        b.samples = tx_d_.size() / (b.mode == LR20XX_TX_FREQ || b.mode == LR20XX_TX_PHASE_STEP ? 1 : 2);
+        lr20xx_link_tx_begin_t b;
         std::vector<uint8_t> d;
-        d.swap(tx_d_);
+        {
+            std::lock_guard<std::mutex> l(tx_m_);
+            b = tx_b_;
+            b.samples = tx_d_.size() / (b.mode == LR20XX_TX_FREQ || b.mode == LR20XX_TX_PHASE_STEP ? 1 : 2);
+            d.swap(tx_d_);
+        }
         return transmit(b, d);
     }
-    virtual void tx_abort() { tx_d_.clear(); }
+    /* (from another thread too: deactivateStream; a transmit under way goes on, unless the backend stops it) */
+    virtual void tx_abort()
+    {
+        std::lock_guard<std::mutex> l(tx_m_);
+        tx_d_.clear();
+    }
     /* The device's clock (RX_DATA's t_us, TX_BEGIN's at_us), us; timed() false: it has none to read (a bridge before
      * LR20XX_LINK_CAP_TIME), and now_us throws. */
     virtual bool timed() { return false; }
@@ -104,6 +118,7 @@ public:
     virtual void allow_untested(bool) {}
 
 protected:
+    std::mutex tx_m_; /* tx_d_ */
     lr20xx_link_tx_begin_t tx_b_{};
     std::vector<uint8_t> tx_d_;
 };
@@ -209,7 +224,9 @@ private:
     struct TxStream;
 
     void configure_rx(); /* RX_CONFIG with the current settings */
-    void tx_flush(TxStream &t, bool end); /* the samples so far, converted and sent */
+    /* the samples so far, converted and sent; more: the write has more pieces to come (a trailing iq_polar dip is
+     * held for them whatever its length) */
+    void tx_flush(TxStream &t, bool end, bool more = false);
     void tx_finish(TxStream &t);          /* the burst's end: its outcome queued for readStreamStatus */
 
     std::unique_ptr<Backend> b_;

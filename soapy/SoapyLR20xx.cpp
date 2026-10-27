@@ -46,9 +46,41 @@ std::string rom_text(const lr20xx_link_hello_t &h)
 
 bool truthy(const std::string &v) { return v == "true" || v == "1" || v == "yes"; }
 
+/* A stream's calls under way (readStream, writeStream, readStreamStatus): closeStream from another thread waits
+ * for them to leave before it frees the stream. */
+struct Calls {
+    int n = 0;
+    std::mutex m;
+    std::condition_variable cv;
+    void wait_none()
+    {
+        std::unique_lock<std::mutex> l(m);
+        cv.wait(l, [this] { return n == 0; });
+    }
+};
+
+class InCall {
+public:
+    explicit InCall(Calls &c) : c_(c)
+    {
+        std::lock_guard<std::mutex> l(c_.m);
+        c_.n++;
+    }
+    ~InCall()
+    {
+        std::lock_guard<std::mutex> l(c_.m);
+        if (--c_.n == 0)
+            c_.cv.notify_all();
+    }
+
+private:
+    Calls &c_;
+};
+
 } // namespace
 
 struct Device::RxStream {
+    Calls calls;
     std::string format;
     Chunk cur;
     size_t off = 0;
@@ -65,9 +97,12 @@ struct Device::RxStream {
 };
 
 struct Device::TxStream {
+    Calls calls;
     std::string format;
     /* the burst under way: begun on the device, its samples converted and sent as they come */
-    bool open = false;
+    std::atomic<bool> open{false};
+    std::atomic<bool> committing{false}; /* TX_COMMIT waits for the burst to go out */
+    std::atomic<bool> closing{false};
     int mode = 0;
     double rate = 0;
     uint64_t n = 0;                          /* samples written */
@@ -169,19 +204,37 @@ SoapySDR::Stream *Device::setupStream(const int dir, const std::string &format, 
 
 void Device::closeStream(SoapySDR::Stream *s)
 {
+    /* another thread may be in the stream's calls: the stream is taken from them first, its burst aborted, and freed
+     * once they have left */
     if ((void *)s == (void *)rx_) {
-        if (rx_->active)
-            deactivateStream(s, 0, 0);
-        delete rx_;
-        rx_ = nullptr;
+        deactivateStream(s, 0, 0);
+        RxStream *r;
+        {
+            std::lock_guard<std::mutex> l(streams_m_);
+            r = rx_;
+            rx_ = nullptr;
+        }
+        r->calls.wait_none(); /* a readStream waiting for samples: up to its timeout */
+        delete r;
     } else if ((void *)s == (void *)tx_) {
-        if (tx_->open)
+        TxStream *t;
+        {
+            std::lock_guard<std::mutex> l(streams_m_);
+            t = tx_;
+            tx_ = nullptr;
+        }
+        t->closing = true;
+        if (t->open || t->committing)
             try {
-                b_->tx_abort(); /* a burst never ended */
+                b_->tx_abort(); /* a burst never ended, or one still going out */
             } catch (...) {
             }
-        delete tx_;
-        tx_ = nullptr;
+        {
+            std::lock_guard<std::mutex> l(t->m);
+            t->cv.notify_all(); /* readStreamStatus */
+        }
+        t->calls.wait_none();
+        delete t;
     }
 }
 
@@ -193,8 +246,10 @@ size_t Device::getStreamMTU(SoapySDR::Stream *s) const
 
 int Device::activateStream(SoapySDR::Stream *s, const int flags, const long long, const size_t)
 {
-    if ((void *)s == (void *)tx_)
+    if ((void *)s == (void *)tx_) {
+        tx_->closing = false;
         return 0;
+    }
     if ((void *)s != (void *)rx_)
         return SOAPY_SDR_STREAM_ERROR;
     if (flags & SOAPY_SDR_HAS_TIME)
@@ -218,6 +273,14 @@ int Device::deactivateStream(SoapySDR::Stream *s, const int, const long long)
         std::lock_guard<std::mutex> l(m_);
         rx_->active = false;
         b_->rx_stop();
+    } else if ((void *)s == (void *)tx_ && (tx_->open || tx_->committing)) {
+        /* a burst not ended, or one waiting on its time or going out (writeStream in another thread): aborted, and
+         * that writeStream returns with STREAM_ERROR in readStreamStatus */
+        try {
+            b_->tx_abort();
+        } catch (const std::exception &e) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
+        }
     }
     return 0;
 }
@@ -227,8 +290,11 @@ int Device::readStream(SoapySDR::Stream *s, void *const *buffs, const size_t num
 {
     RxStream *r = (RxStream *)s;
     flags = 0;
+    std::unique_lock<std::mutex> sl(streams_m_);
     if ((void *)s != (void *)rx_ || !r->active)
         return SOAPY_SDR_STREAM_ERROR;
+    InCall in(r->calls);
+    sl.unlock();
     const size_t have = r->cur.data.size();
     if (r->off >= have) {
         if (!b_->queue().pop(r->cur, timeoutUs)) {
@@ -292,8 +358,11 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
                         const long long timeNs, const long)
 {
     TxStream *t = (TxStream *)s;
-    if ((void *)s != (void *)tx_)
+    std::unique_lock<std::mutex> sl(streams_m_);
+    if ((void *)s != (void *)tx_ || t->closing)
         return SOAPY_SDR_STREAM_ERROR;
+    InCall in(t->calls);
+    sl.unlock();
     const bool streams = hello_.caps & LR20XX_LINK_CAP_TX_STREAM;
     if (!streams && t->n + t->buf.size() + numElems > hello_.tx_max_samples) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "LR20xx: a burst of more than %u samples doesn't fit the device",
@@ -473,6 +542,7 @@ void Device::tx_finish(TxStream &t)
     }
     int status = SOAPY_SDR_END_BURST;
     long long key_ns = 0;
+    t.committing = true;
     try {
         lr20xx_link_tx_result_t r = b_->tx_commit();
         if (r.key_us)
@@ -486,9 +556,11 @@ void Device::tx_finish(TxStream &t)
         else if (r.early)
             status = SOAPY_SDR_STREAM_ERROR;
     } catch (const std::exception &e) {
-        SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
+        if (!t.closing) /* (aborted on purpose: no news) */
+            SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
         status = SOAPY_SDR_STREAM_ERROR;
     }
+    t.committing = false;
     std::lock_guard<std::mutex> l(t.m);
     t.status.push_back({status, key_ns});
     t.cv.notify_all();
@@ -498,11 +570,16 @@ int Device::readStreamStatus(SoapySDR::Stream *s, size_t &chanMask, int &flags, 
                              const long timeoutUs)
 {
     TxStream *t = (TxStream *)s;
+    std::unique_lock<std::mutex> sl(streams_m_);
     if ((void *)s != (void *)tx_)
         return SOAPY_SDR_NOT_SUPPORTED;
+    InCall in(t->calls);
+    sl.unlock();
     std::unique_lock<std::mutex> l(t->m);
-    if (!t->cv.wait_for(l, std::chrono::microseconds(timeoutUs), [t] { return !t->status.empty(); }))
+    if (!t->cv.wait_for(l, std::chrono::microseconds(timeoutUs), [t] { return !t->status.empty() || t->closing; }))
         return SOAPY_SDR_TIMEOUT;
+    if (t->status.empty())
+        return SOAPY_SDR_STREAM_ERROR; /* closed */
     auto st = t->status.front();
     t->status.pop_front();
     chanMask = 1;
@@ -629,8 +706,12 @@ void Device::configure_rx()
     plan_ = b_->rx_config(c);
     have_plan_ = true;
     if (rx_ && rx_->active) {
+        const uint32_t den = plan_.rate_den ? plan_.rate_den : 1;
+        /* the sample count still holds the old rate's samples: the next chunk anchors the time afresh */
+        if ((uint64_t)plan_.rate_num * rx_->rate_den != (uint64_t)rx_->rate_num * den)
+            rx_->anchored = false;
         rx_->rate_num = plan_.rate_num;
-        rx_->rate_den = plan_.rate_den ? plan_.rate_den : 1;
+        rx_->rate_den = den;
     }
 }
 

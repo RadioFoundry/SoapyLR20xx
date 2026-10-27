@@ -104,7 +104,16 @@ static struct {
                                                                * started, the first TX_DATA came */
         SemaphoreHandle_t done;
     } job;
+    /* TX_COMMIT answered when the transmission ends (the pump), so the link goes on meanwhile: samples, other
+     * commands, TX_ABORT */
+    bool commit_wait;  /* a TX_COMMIT waits for its answer */
+    bool commit_ended; /* and its transmission ended (taken by tx_cancel) */
+    uint16_t commit_seq;
+    uint16_t req_seq; /* the request being handled */
 } B;
+
+/* For the status's lead times, which a far time would wrap */
+static int32_t clamp32(int64_t v) { return v > INT32_MAX ? INT32_MAX : v < INT32_MIN ? INT32_MIN : (int32_t)v; }
 
 static void lock(void)
 {
@@ -116,6 +125,8 @@ static void lock(void)
 static void unlock(void) { xSemaphoreGive(B.lock); }
 
 bool bridge_streaming(void) { return B.streaming; }
+
+int bridge_idle_ms(int ms) { return B.streaming ? 0 : B.commit_wait ? 1 : ms; }
 
 /* ── the reader ─────────────────────────────────────────────────────────── */
 
@@ -182,19 +193,16 @@ static void run_tx(void)
     B.tx.streamed = true; /* the ring: data may lag (a known length ends where it ends, as streamed) */
     B.tx.stop = &B.job.stop;
     const int64_t t0 = esp_timer_get_time();
-    B.job.start_lead_us = B.tx.at_us ? (int32_t)(B.tx.at_us - t0) : 0;
-    if (B.job.stop) /* cancelled before it began (a timed one, waiting): the receiver left alone */
+    B.job.start_lead_us = B.tx.at_us ? clamp32(B.tx.at_us - t0) : 0;
+    const bool before = B.job.stop; /* cancelled before it began (a timed one, waiting): the receiver left alone */
+    if (before)
         B.job.stats.stopped = true;
     else
         B.job.e = lr20xx_iq_transmit(&iq, &B.tx, tx_pull, NULL, &B.job.stats);
     const lr20xx_tx_stream_stats_t *s = &B.job.stats;
-    B.job.setup_us = s->ready_us ? (int32_t)(s->ready_us - t0) : -1;
-    B.job.key_late_us = B.tx.at_us && s->key_us ? (int32_t)(s->key_us - B.tx.at_us) : 0;
-    ESP_LOGI(TAG, "tx: %d runs, %u refills, restart %" PRIu32 " us, gap %" PRIu32 " us, FIFO at TX_DONE %d, flags 0x%02x, "
-             "set-up %" PRId32 " us%s",
-             s->runs, s->refills, s->restart_us, s->gap_us, s->done_level, s->tx_flags, B.job.setup_us,
-             s->late ? ", late: not sent" : "");
-    if (B.streaming)
+    B.job.setup_us = s->ready_us ? clamp32(s->ready_us - t0) : -1;
+    B.job.key_late_us = B.tx.at_us && s->key_us ? clamp32(s->key_us - B.tx.at_us) : 0;
+    if (B.streaming && !before)
         B.gap_pending = true; /* no samples while it transmitted */
     unlock();
     B.job.running = false;
@@ -437,8 +445,18 @@ static void tx_cancel(void)
         xTaskNotifyGive(B.reader); /* a timed one may be waiting for its time */
         xSemaphoreTake(B.job.done, portMAX_DELAY);
         B.tx_started = false;
+        B.commit_ended = B.commit_wait; /* a TX_COMMIT waiting is answered (stopped) */
     }
 }
+
+/* A new session (HELLO, the link gone): a TX_COMMIT still waiting belongs to the old one */
+static void tx_drop(void)
+{
+    tx_cancel();
+    B.commit_wait = B.commit_ended = false;
+}
+
+static bool commit_ready(void) { return B.commit_wait && (B.commit_ended || uxSemaphoreGetCount(B.job.done)); }
 
 /* Start the transmission once enough is in: all of it, a full ring, or (from 0.2 s of samples) when the rest will
  * come in before what's in goes out at the link's rate so far, with 0.2 s to spare. Streamed: from 0.2 s. Timed:
@@ -472,7 +490,7 @@ void bridge_link_closed(bridge_link_t *l)
 {
     if (B.streaming)
         rx_stop();
-    tx_cancel();
+    tx_drop();
 }
 
 static bool tx_mode_ok(uint8_t m)
@@ -480,7 +498,11 @@ static bool tx_mode_ok(uint8_t m)
     return m == LR20XX_TX_FREQ || m == LR20XX_TX_PHASE_STEP || m == LR20XX_TX_IQ_PHASE || m == LR20XX_TX_IQ_POLAR;
 }
 
-/* A command: its answer into ans (*n bytes), the error back. */
+#define LR20XX_PENDING ((lr20xx_err_t)1) /* answered later (TX_COMMIT) */
+
+static lr20xx_err_t chip_command(uint16_t cmd, const uint8_t *a, size_t an, uint8_t *ans, size_t *n);
+
+/* A command: its answer into ans (*n bytes), the error back (LR20XX_PENDING: no answer yet). */
 static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, size_t an, uint8_t *ans, size_t *n)
 {
     *n = 0;
@@ -488,7 +510,7 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         /* a new session: a serial port has no connection to say so (link_serial.c) */
         if (B.streaming)
             rx_stop();
-        tx_cancel();
+        tx_drop();
         *n = bridge_hello(ans);
         return LR20XX_OK;
     }
@@ -575,7 +597,7 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         if (!B.tx_open)
             return LR20XX_ERR_INVALID_STATE;
         B.tx_open = false;
-        B.job.commit_lead_us = B.tx.at_us ? (int32_t)(B.tx.at_us - esp_timer_get_time()) : 0;
+        B.job.commit_lead_us = B.tx.at_us ? clamp32(B.tx.at_us - esp_timer_get_time()) : 0;
         if (B.tx_end == SIZE_MAX)
             __atomic_store_n(&B.tx_end, B.tx_in, __ATOMIC_RELEASE);
         const bool late = B.tx_started && !B.job.running && B.job.stats.late; /* what's still coming has nowhere
@@ -588,18 +610,10 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         }
         if (!B.tx_started)
             tx_start_due(); /* everything is in */
-        xSemaphoreTake(B.job.done, portMAX_DELAY);
-        B.tx_started = false;
-        const lr20xx_tx_stream_stats_t *s = &B.job.stats;
-        const lr20xx_link_tx_result_t r = {.runs = s->runs, .sent = (uint32_t)s->sent, .tx_flags = s->tx_flags,
-                                           .early = s->early, .timed_out = s->timed_out,
-                                           .key_us = s->late ? 0 : s->key_us, .late = s->late};
-        *n = lr20xx_link_put_tx_result(ans, &r);
-        if (s->late)
-            return LR20XX_OK; /* said in the result */
-        if (B.job.e == LR20XX_OK && s->sent < B.tx_end)
-            return LR20XX_ERR_TIMEOUT; /* the data stopped coming for a second */
-        return B.job.e;
+        B.commit_wait = true; /* answered by commit_answer when it ends */
+        B.commit_ended = false;
+        B.commit_seq = B.req_seq;
+        return LR20XX_PENDING;
     }
     case LR20XX_CMD_TX_ABORT:
         tx_cancel();
@@ -611,7 +625,51 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
     default:
         break;
     }
-    /* The chip by hand: only while it isn't receiving. */
+    return chip_command(cmd, a, an, ans, n);
+}
+
+/* TX_COMMIT's answer, the transmission over: its stats, and the error (logged here, in the link task: a log line in
+ * the reader, receiving again, would stall it past the FIFO) */
+static lr20xx_err_t commit_result(uint8_t *ans, size_t *n)
+{
+    const lr20xx_tx_stream_stats_t *s = &B.job.stats;
+    if (!s->stopped || s->runs)
+        ESP_LOGI(TAG, "tx: %d runs, %u refills, restart %" PRIu32 " us, gap %" PRIu32 " us, FIFO at TX_DONE %d, "
+                 "flags 0x%02x, set-up %" PRId32 " us%s",
+                 s->runs, s->refills, s->restart_us, s->gap_us, s->done_level, s->tx_flags, B.job.setup_us,
+                 s->late ? ", late: not sent" : "");
+    const lr20xx_link_tx_result_t r = {.runs = s->runs, .sent = (uint32_t)s->sent, .tx_flags = s->tx_flags,
+                                       .early = s->early, .timed_out = s->timed_out,
+                                       .key_us = s->late ? 0 : s->key_us, .late = s->late};
+    *n = lr20xx_link_put_tx_result(ans, &r);
+    if (s->late)
+        return LR20XX_OK; /* said in the result */
+    if (s->stopped)
+        return LR20XX_ERR_INVALID_STATE; /* TX_ABORT came first */
+    if (B.job.e == LR20XX_OK && s->sent < B.tx_end)
+        return LR20XX_ERR_TIMEOUT; /* the data stopped coming for a second */
+    return B.job.e;
+}
+
+/* The answer to a TX_COMMIT whose transmission has ended (the link task, from the pump) */
+static int commit_answer(bridge_link_t *l)
+{
+    if (!B.commit_wait)
+        return 0;
+    if (!B.commit_ended && xSemaphoreTake(B.job.done, 0) != pdTRUE)
+        return 0;
+    B.commit_wait = B.commit_ended = false;
+    B.tx_started = false;
+    static uint8_t ans[64];
+    size_t n = 0;
+    const lr20xx_err_t e = commit_result(ans, &n);
+    return send_frame(l, lr20xx_link_rsp(l->out, sizeof l->out, B.commit_seq, e, ans, n)) < 0 ? -1 : 0;
+}
+
+/* The chip by hand: only while it isn't receiving. */
+static lr20xx_err_t chip_command(uint16_t cmd, const uint8_t *a, size_t an, uint8_t *ans, size_t *n)
+{
+    lr20xx_err_t e;
     if (B.streaming)
         return LR20XX_ERR_INVALID_STATE;
     switch (cmd) {
@@ -633,6 +691,7 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         uint8_t f[12];
         lock();
         e = lr20xx_write(B.dev, f, lr20xx_cmd_write_reg32(f, lr20xx_link_u32(a), lr20xx_link_u32(a + 4)));
+        iq.cal_word = 0; /* the chip changed by hand: the next transmission calibrates */
         unlock();
         return e;
     }
@@ -646,6 +705,7 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         lock();
         e = want ? lr20xx_read(B.dev, a + 2, an - 2, ans + 2, want) : lr20xx_send(B.dev, a + 2, an - 2);
         lr20xx_get_status(B.dev, &st);
+        iq.cal_word = 0; /* (it may have been a reset or a CalibFE) */
         unlock();
         /* status: the command status (0 FAIL, 1 PERR, 2 OK, 3 DATA) and the chip's mode, as lr20xx_status gives */
         ans[0] = st.cmd;
@@ -671,6 +731,7 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
 
 static int handle(bridge_link_t *l, const lr20xx_link_frame_t *f)
 {
+    /* (bridge_link_pump: bridge.h) */
     if (f->type == LR20XX_LINK_TX_DATA) {
         if (!B.tx_open)
             return 0;
@@ -680,9 +741,15 @@ static int handle(bridge_link_t *l, const lr20xx_link_frame_t *f)
             k = B.tx_end - in;
             B.tx_over = true;
         }
-        /* a full ring waits for the transmission to take some (the link's own flow control holds the host) */
-        while (B.tx_started && B.job.running && in + k - B.job.pos > TX_BYTES)
-            vTaskDelay(1);
+        /* a full ring waits for the transmission to take some (the link's own flow control holds the host); a timed
+         * one takes none before its time, so the samples received meanwhile keep going out */
+        while (B.tx_started && B.job.running && in + k - B.job.pos > TX_BYTES) {
+            const int p = B.streaming ? bridge_link_pump(l, 1) : 0;
+            if (p < 0)
+                return -1;
+            if (!p)
+                vTaskDelay(1);
+        }
         if (in + k - (B.tx_started ? B.job.pos : 0) > TX_BYTES) {
             B.tx_over = true; /* the transmission ended: nothing takes it */
             return 0;
@@ -707,7 +774,10 @@ static int handle(bridge_link_t *l, const lr20xx_link_frame_t *f)
     /* the arguments live in the parser's buffer, which the answer doesn't touch */
     static uint8_t ans[300];
     size_t n = 0;
+    B.req_seq = seq;
     lr20xx_err_t e = command(l, cmd, a, an, ans, &n);
+    if (e == LR20XX_PENDING)
+        return 0;
     if (send_frame(l, lr20xx_link_rsp(l->out, sizeof l->out, seq, e, ans, n)) < 0)
         return -1;
     if (cmd == LR20XX_CMD_HELLO && !B.chip_ok && !l->hello_sent_event) {
@@ -738,13 +808,15 @@ static size_t ring_wait(bridge_link_t *l, void *buf, size_t cap, int64_t until_u
     for (;;) {
         const bool more = esp_timer_get_time() < until_us;
         const size_t m = xMessageBufferReceive(B.ring, buf, cap, more ? 1 : 0);
-        if (m || !more || (l->pending && l->pending(l)))
+        if (m || !more || (l->pending && l->pending(l)) || commit_ready())
             return m;
     }
 }
 
 int bridge_link_pump(bridge_link_t *l, int wait_ms)
 {
+    if (commit_answer(l) < 0)
+        return -1;
     if (B.rx_failed) {
         B.rx_failed = false;
         if (send_event(l, LR20XX_EVENT_RX_FAILED, B.rx_e, B.rx_err) < 0)

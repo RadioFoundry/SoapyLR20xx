@@ -80,6 +80,12 @@ after a second with nothing, the bridge ends it and TX_COMMIT answers `LR20XX_ER
 bridge buffers the whole burst first, and HELLO's `tx_max_samples` is the most it takes. Reception pauses for the
 burst and resumes after it, with a gap.
 
+TX_COMMIT is answered when the burst has gone out, and the bridge goes on meanwhile: RX_DATA, and the answers to
+other requests, which may come before TX_COMMIT's (match answers by `seq`). TX_ABORT then (or the host leaving)
+stops the burst, a timed one still waiting at once and with no gap in reception, and TX_COMMIT answers
+`LR20XX_ERR_INVALID_STATE`. A new TX_BEGIN is refused until TX_COMMIT has been answered. While a timed burst's ring
+is full ahead of its time, the bridge stops reading the link but goes on sending RX_DATA.
+
 Time: RX_DATA's `t_us`, TIME's answer, `at_us` and `key_us` are one clock, the bridge's since it booted. With
 capability 0x10 (TIME), a TX_BEGIN `at_us` other than 0 keys up then: it starts on its first TX_DATA, reception
 goes on until 4.5 ms before (18 ms when it calibrates first, R3.48), the FIFO is filled, and the SetTx's frame

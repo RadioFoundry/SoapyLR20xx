@@ -79,7 +79,7 @@ static void tcp_task(void *arg)
         if (fd >= 0)
             FD_SET(fd, &r);
         /* receiving: don't wait on the host, the samples are what's waited for (pump) */
-        struct timeval tv = {0, bridge_streaming() ? 0 : 50000};
+        struct timeval tv = {0, bridge_idle_ms(50) * 1000};
         int nr = select((fd > ls ? fd : ls) + 1, &r, NULL, NULL, &tv);
         if (nr > 0 && FD_ISSET(ls, &r)) {
             struct sockaddr_in peer;

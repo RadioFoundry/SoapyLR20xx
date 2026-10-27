@@ -143,7 +143,7 @@ static void serial_task(void *arg)
             const int k = serial_port_read(in + n, sizeof in - (size_t)n, 0);
             n += k > 0 ? k : 0;
         } else {
-            n = serial_port_read(in, sizeof in, bridge_streaming() ? 0 : 20);
+            n = serial_port_read(in, sizeof in, bridge_idle_ms(20));
         }
         if (!up) {
             if (n <= 0)

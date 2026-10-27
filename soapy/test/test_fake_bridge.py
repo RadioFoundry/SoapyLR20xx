@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 ap = argparse.ArgumentParser()
@@ -26,7 +27,7 @@ os.environ["SOAPY_SDR_PLUGIN_PATH"] = os.path.abspath(args.module_dir)
 try:
     import SoapySDR
     from SoapySDR import (SOAPY_SDR_CF32, SOAPY_SDR_END_BURST, SOAPY_SDR_HAS_TIME, SOAPY_SDR_NOT_SUPPORTED, SOAPY_SDR_OVERFLOW, SOAPY_SDR_RX,
-                          SOAPY_SDR_TIME_ERROR, SOAPY_SDR_TX)
+                          SOAPY_SDR_STREAM_ERROR, SOAPY_SDR_TIME_ERROR, SOAPY_SDR_TX)
 except ImportError:
     print("no SoapySDR Python bindings: skipped")
     sys.exit(77)
@@ -191,8 +192,37 @@ try:
                             timeoutUs=1000000)
         st = sdr.readStreamStatus(tx, timeoutUs=3000000)
         check(st.ret == SOAPY_SDR_TIME_ERROR, "late: %d" % st.ret)
+
+        # a burst waiting 2 s for its time, its writer in another thread: deactivateStream aborts it (the writer
+        # back at once, STREAM_ERROR in the status), and closeStream does too, freeing the stream once it's left
+        res = {}
+
+        def writer(stream):
+            t0 = time.monotonic()
+            res["w"] = sdr.writeStream(stream, [tb], n, SOAPY_SDR_END_BURST | SOAPY_SDR_HAS_TIME,
+                                       sdr.getHardwareTime("") + 2 * 10**9, timeoutUs=1000000).ret
+            res["dt"] = time.monotonic() - t0
+
+        th = threading.Thread(target=writer, args=(tx,))
+        th.start()
+        time.sleep(0.3)
         sdr.deactivateStream(tx)
+        th.join(3)
+        check(not th.is_alive() and res.get("dt", 9) < 1.0, "deactivated while waiting: back in %.2f s" %
+              res.get("dt", -1))
+        st = sdr.readStreamStatus(tx, timeoutUs=100000)
+        check(st.ret == SOAPY_SDR_STREAM_ERROR, "aborted burst's status %d" % st.ret)
+        sdr.activateStream(tx)
+        res.clear()
+        th = threading.Thread(target=writer, args=(tx,))
+        th.start()
+        time.sleep(0.3)
+        t0 = time.monotonic()
         sdr.closeStream(tx)
+        dt = time.monotonic() - t0
+        th.join(3)
+        check(not th.is_alive() and dt < 1.0 and res.get("dt", 9) < 1.0,
+              "closed while waiting: closeStream %.2f s, the writer back in %.2f s" % (dt, res.get("dt", -1)))
 
     # a streamed burst: written in parts, it must go out as the same burst written whole, in each mode (iq_polar's
     # dips under rmin cross the parts' edges)

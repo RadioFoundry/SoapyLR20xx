@@ -138,8 +138,10 @@ static lr20xx_err_t modem_setup(lr20xx_iq_t *iq, bool calib)
             LR20XX_OK)
         return failed(iq, "SetPacketType", e);
     if (calib) {
-        if ((e = cmd(iq, f, lr20xx_cmd_calib_fe(f, &cal_hz, 1, hf(hz)))) != LR20XX_OK)
+        if ((e = cmd(iq, f, lr20xx_cmd_calib_fe(f, &cal_hz, 1, hf(hz)))) != LR20XX_OK) {
+            iq->cal_word = 0; /* the last one's may be gone too */
             return failed(iq, "CalibFE", e);
+        }
         iq->cal_word = lr20xx_calib_fe_word(cal_hz, hf(hz));
     }
     if ((e = cmd(iq, f, lr20xx_cmd_set_rf_frequency(f, chip_hz))) != LR20XX_OK)

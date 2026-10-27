@@ -41,6 +41,10 @@ void bridge_link_closed(bridge_link_t *l);
 /* Whether samples are flowing (the transport waits on the buffer then, not on the host). */
 bool bridge_streaming(void);
 
+/* How long a link may wait on its host with nothing to do: 0 while receiving (the samples are waited on in the
+ * pump), 1 ms while a TX_COMMIT waits for its transmission to end (the pump answers it), else ms */
+int bridge_idle_ms(int ms);
+
 /* The HELLO answer's payload (LR20XX_LINK_HELLO_SIZE bytes), for UDP discovery too. */
 size_t bridge_hello(uint8_t *p);
 

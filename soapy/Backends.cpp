@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <ifaddrs.h>
@@ -272,16 +273,36 @@ public:
     {
         if (!timed())
             return Backend::now_us();
+        const int64_t t0 = host_us();
         auto a = request(LR20XX_CMD_TIME, nullptr, 0);
         if (a.size() < 8)
             throw Error(-1, "LR20xx: short TIME answer");
-        return (int64_t)lr20xx_link_u64(a.data());
+        const int64_t dev = (int64_t)lr20xx_link_u64(a.data());
+        clock_off_us_ = dev - (t0 + host_us()) / 2;
+        return dev;
     }
 
-    /* A timed burst's wait before it starts, s (0: untimed) */
+    static int64_t host_us()
+    {
+        return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+    /* A timed burst's wait before it starts, s (0: untimed). From the host's clock and the device's offset as last
+     * measured, if the device doesn't answer (the commit has to go out whatever) */
     double wait_s(const lr20xx_link_tx_begin_t &b)
     {
-        return b.at_us && timed() ? std::max(0.0, (double)(b.at_us - now_us()) / 1e6) : 0;
+        if (!b.at_us || !timed())
+            return 0;
+        int64_t now;
+        try {
+            now = now_us();
+        } catch (const std::exception &) {
+            if (clock_off_us_ == INT64_MIN)
+                return 10;
+            now = host_us() + clock_off_us_;
+        }
+        return std::max(0.0, (double)(b.at_us - now) / 1e6);
     }
 
     float temperature() override
@@ -479,6 +500,7 @@ private:
     std::string where_;
     uint8_t caps_ = 0;
     std::atomic<bool> receiving_{false};
+    std::atomic<int64_t> clock_off_us_{INT64_MIN}; /* the device's clock less the host's steady clock */
     uint64_t tx_sent_ = 0; /* a streamed transmission's bytes so far */
     lr20xx_link_parser_t parser_;
     std::thread reader_;
@@ -831,12 +853,6 @@ public:
 
     lr20xx_link_tx_result_t transmit(const lr20xx_link_tx_begin_t &b, const std::vector<uint8_t> &data) override
     {
-        /* timed: receiving goes on until 10 ms ahead (the set-up), then the library waits for the time */
-        if (b.at_us && b.at_us - lr20xx_now_us() > 10000)
-            std::this_thread::sleep_for(std::chrono::microseconds(b.at_us - lr20xx_now_us() - 10000));
-        std::lock_guard<std::mutex> l(m_);
-        if (!inited_)
-            init();
         lr20xx_iq_tx_t t{};
         t.mode = (lr20xx_tx_mode_t)b.mode;
         t.center_hz = b.center_hz;
@@ -846,6 +862,24 @@ public:
         t.power_dbm = b.power_dbm;
         t.samples = b.samples;
         t.at_us = b.at_us;
+        t.stop = &tx_stop_;
+        /* timed: receiving goes on until the set-up's time ahead (10 ms, 25 ms with a CalibFE), then the library waits
+         * for the time; tx_abort ends the wait */
+        if (b.at_us) {
+            int64_t lead = 10000;
+            {
+                std::lock_guard<std::mutex> l(m_);
+                if (!inited_ || lr20xx_iq_tx_calibrates(iq_.get(), &t))
+                    lead = 25000;
+            }
+            for (int64_t left; !tx_stop_ && (left = b.at_us - lr20xx_now_us() - lead) > 0;)
+                std::this_thread::sleep_for(std::chrono::microseconds(std::min<int64_t>(left, 10000)));
+        }
+        if (tx_stop_)
+            throw Error(LR20XX_ERR_INVALID_STATE, "LR20xx: the transmission was aborted");
+        std::lock_guard<std::mutex> l(m_);
+        if (!inited_)
+            init();
         struct Src {
             const std::vector<uint8_t> *d;
             size_t off;
@@ -867,10 +901,21 @@ public:
         r.timed_out = st.timed_out;
         r.key_us = st.late ? 0 : st.key_us;
         r.late = st.late;
+        if (st.stopped)
+            throw Error(LR20XX_ERR_INVALID_STATE, "LR20xx: the transmission was aborted");
         if (e != LR20XX_OK && !st.timed_out && !st.early)
             check(e, "transmit");
         return r;
     }
+
+    void tx_begin(const lr20xx_link_tx_begin_t &b) override
+    {
+        tx_stop_ = false;
+        Backend::tx_begin(b);
+    }
+
+    /* stops a transmission under way (another thread's tx_commit), or drops the parts gathered */
+    void tx_abort() override { tx_stop_ = true; }
 
     std::vector<uint32_t> read_reg(uint32_t addr, int n) override
     {
@@ -1001,6 +1046,7 @@ private:
     std::unique_ptr<lr20xx_iq_t> iq_;
     lr20xx_iq_cfg_t cfg_{250000, LR20XX_IQ_AUTO, 915e6, 0, 13};
     bool inited_ = false, allow_ = false;
+    volatile bool tx_stop_ = false; /* tx_abort: the transmission under way ends */
     std::mutex m_;
     std::condition_variable cv_;
     std::thread reader_;

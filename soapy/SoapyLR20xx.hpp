@@ -231,6 +231,7 @@ private:
     double tx_rate_ = 48000, tx_fdev_ = 2048, tx_power_ = 0, tx_center_ = 0, polar_rmin_ = 0.2;
     RxStream *rx_ = nullptr;
     TxStream *tx_ = nullptr;
+    std::mutex streams_m_; /* rx_ and tx_ against closeStream (a stream's calls hold it only to enter) */
     /* time: the device's clock in ns plus this (setHardwareTime) */
     std::atomic<long long> time_offset_{0};
 };

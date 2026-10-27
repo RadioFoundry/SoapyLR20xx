@@ -108,6 +108,7 @@ class Client:
         self.tx = None
         self.index = 0  # the stream's sample index: what was delivered since RX_START
         self.gap = False  # the next frame after a pause (a transmission) carries a gap
+        self.tx_stop = None  # set: the transmission under way (TX_COMMIT waiting) ends
 
     def send(self, t, payload):
         with self.send_lock:
@@ -209,6 +210,8 @@ class Client:
             return self.rsp(seq)
         if cmd == TX_ABORT:
             self.tx = None
+            if self.tx_stop:
+                self.tx_stop.set()
             return self.rsp(seq)
         if cmd == TX_COMMIT:
             tx, self.tx = self.tx, None
@@ -219,28 +222,43 @@ class Client:
             want = tx["n"] * TX_BYTES[tx["mode"]]
             if len(tx["data"]) != want or not want:
                 return self.rsp(seq, ERR_INVALID_ARG, b"%d bytes, not %d" % (len(tx["data"]), want))
-            restart = self.streaming
-            self.stop()  # half duplex
-            key, late = int(time.monotonic() * 1e6), 0
-            if tx["at"]:
-                late = int(key > tx["at"] + 100)  # LR20XX_TX_LATE_US
-                if tx["at"] > key:
-                    time.sleep((tx["at"] - key) / 1e6)
-                key = 0 if late else int(time.monotonic() * 1e6)
-            if not late:
-                time.sleep(min(1.0, tx["n"] / tx["rate"]))
-            if self.args.tx_dump:
-                with open(self.args.tx_dump, "wb") as f:
-                    f.write(bytes([tx["mode"]]) + bytes(tx["data"]))
-            if restart:
-                self.gap = True
-                self.start()
-            runs = 0 if late else -(-tx["n"] // 65535)
-            sent = 0 if late else len(tx["data"])
-            return self.rsp(seq, 0, struct.pack("<iIBBBqB", runs, sent, 0, 0, 0, key, late))
+            # answered when it has gone out, as the bridge does: the link goes on meanwhile (TX_ABORT, TIME, samples)
+            self.tx_stop = threading.Event()
+            threading.Thread(target=self.transmit, args=(seq, tx, self.tx_stop), daemon=True).start()
+            return None
         if cmd == TIME and not self.args.no_tx_stream:
             return self.rsp(seq, 0, struct.pack("<q", int(time.monotonic() * 1e6)))
         return self.rsp(seq, ERR_NOT_SUPPORTED)
+
+    def transmit(self, seq, tx, stop):
+        def now():
+            return int(time.monotonic() * 1e6)
+        # timed: receiving goes on until the set-up's time ahead (5 ms here); an abort before then leaves it alone
+        if tx["at"] and stop.wait(max(0.0, (tx["at"] - 5000 - now()) / 1e6)):
+            return self.rsp(seq, ERR_INVALID_STATE, b"aborted")
+        restart = self.streaming
+        self.stop()  # half duplex
+        key, late = now(), 0
+        if tx["at"]:
+            late = int(key > tx["at"] + 100)  # LR20XX_TX_LATE_US
+            if tx["at"] > key:
+                time.sleep((tx["at"] - key) / 1e6)
+            key = 0 if late else now()
+        aborted = not late and stop.wait(min(1.0, tx["n"] / tx["rate"]))
+        if aborted:
+            if restart:
+                self.gap = True
+                self.start()
+            return self.rsp(seq, ERR_INVALID_STATE, b"aborted")
+        if self.args.tx_dump:
+            with open(self.args.tx_dump, "wb") as f:
+                f.write(bytes([tx["mode"]]) + bytes(tx["data"]))
+        if restart:
+            self.gap = True
+            self.start()
+        runs = 0 if late else -(-tx["n"] // 65535)
+        sent = 0 if late else len(tx["data"])
+        return self.rsp(seq, 0, struct.pack("<iIBBBqB", runs, sent, 0, 0, 0, key, late))
 
     def start(self):
         self.streaming = True
@@ -271,6 +289,8 @@ class Client:
         except OSError:
             pass
         finally:
+            if self.tx_stop:
+                self.tx_stop.set()
             self.stop()
             self.s.close()
 

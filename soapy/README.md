@@ -57,8 +57,11 @@ gives (docs/iq.md section 2; `lr20xx_iq.h`'s table).
 | `conv8` | CS8 | any rate the converter makes, up to 576 kS/s |
 
 CS8's full scale is 32: the chip's int8 clips at −32..+31 (R2.26). CF32 is scaled by the native full scale.
-`readStream` gives each buffer a time from its first sample's index in the stream (`SOAPY_SDR_HAS_TIME`), so a
-loss shows as a jump; the loss itself is returned once as `SOAPY_SDR_OVERFLOW` before the samples after it.
+`readStream` gives each buffer its first sample's time (`SOAPY_SDR_HAS_TIME`) on the device's clock: the sample
+count from a time taken from the reads (each read's end bounds its last sample), so across a loss or a transmission
+the time jumps by about the samples missed (within a read's lateness, a few hundred us), and in between it follows
+the count. The loss itself is returned once as `SOAPY_SDR_OVERFLOW` before the samples after it.
+`getHardwareTime` reads the device's clock (its time since boot, plus what `setHardwareTime` moved it by).
 
 Gain: one element, `LNA`, −8 to 53.5 dB in the chip's 13 steps (R2.25), set to the nearest; `setGainMode(true)` is
 the chip's AGC. Until a gain or the AGC is set, it's 53.5 dB for CS16 and 9 dB for CS8: int8's 6 bits clip on the
@@ -74,6 +77,12 @@ converted and sent as it comes: the bridge keys up once it has 0.2 s of samples 
 `SOAPY_SDR_END_BURST`, `SOAPY_SDR_UNDERFLOW` if the chip's FIFO ran dry (R3.13: write faster than the rate), or
 `SOAPY_SDR_TIMEOUT`. A bridge from before streamed transmissions gets the burst whole at the end, and refuses one
 longer than it buffers (HELLO's `tx_max_samples`).
+
+A burst's first `writeStream` with `SOAPY_SDR_HAS_TIME` starts it at that time (`getHardwareTime`'s clock, the same
+as the receive timestamps'): reception goes on until 10 ms before, and the chip keys up at the time (the signal
+follows by its start-up, about 60-70 us). `readStreamStatus` gives the key-up's time with `SOAPY_SDR_HAS_TIME`, or
+`SOAPY_SDR_TIME_ERROR` (nothing sent) when the burst wasn't ready by then: write it at least 10 ms ahead, plus the
+link's delay. A bridge from before timed bursts refuses one (`SOAPY_SDR_NOT_SUPPORTED`).
 
 | `tx_mode` | Sent | |
 |---|---|---|

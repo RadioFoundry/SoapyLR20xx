@@ -37,6 +37,7 @@ static const char *TAG = "bridge";
 
 #define RING_BYTES ((size_t)CONFIG_LR20XX_RING_KB * 1024)
 #define TX_BYTES ((size_t)CONFIG_LR20XX_TX_BUF_KB * 1024)
+#define TX_LEAD_US 10000 /* a timed transmission's set-up starts this far ahead */
 #define MSG_MAX (LR20XX_LINK_RX_HDR + LR20XX_IQ_FIFO_BYTES + 4) /* one read and its header */
 #define COALESCE_US 10000 /* the longest a frame waits to fill */
 #define READER_PRIO 24
@@ -94,6 +95,8 @@ static struct {
         lr20xx_tx_stream_stats_t stats;
         volatile size_t pos;    /* bytes taken (the reader's) */
         int64_t starved_since;
+        int32_t setup_us;       /* the start to the FIFO prefilled */
+        int32_t key_late_us;    /* timed: the first SetTx past at_us */
         SemaphoreHandle_t done;
     } job;
 } B;
@@ -172,10 +175,15 @@ static void run_tx(void)
     B.job.starved_since = 0;
     B.tx.streamed = true; /* the ring: data may lag (a known length ends where it ends, as streamed) */
     B.tx.stop = &B.job.stop;
+    const int64_t t0 = esp_timer_get_time();
     B.job.e = lr20xx_iq_transmit(&iq, &B.tx, tx_pull, NULL, &B.job.stats);
     const lr20xx_tx_stream_stats_t *s = &B.job.stats;
-    ESP_LOGI(TAG, "tx: %d runs, %u refills, restart %" PRIu32 " us, gap %" PRIu32 " us, FIFO at TX_DONE %d, flags 0x%02x",
-             s->runs, s->refills, s->restart_us, s->gap_us, s->done_level, s->tx_flags);
+    B.job.setup_us = s->ready_us ? (int32_t)(s->ready_us - t0) : -1;
+    B.job.key_late_us = B.tx.at_us && s->key_us ? (int32_t)(s->key_us - B.tx.at_us) : 0;
+    ESP_LOGI(TAG, "tx: %d runs, %u refills, restart %" PRIu32 " us, gap %" PRIu32 " us, FIFO at TX_DONE %d, flags 0x%02x, "
+             "set-up %" PRId32 " us%s",
+             s->runs, s->refills, s->restart_us, s->gap_us, s->done_level, s->tx_flags, B.job.setup_us,
+             s->late ? ", late: not sent" : "");
     if (B.streaming)
         B.gap_pending = true; /* no samples while it transmitted */
     unlock();
@@ -187,18 +195,21 @@ static void run_tx(void)
 static void reader_task(void *arg)
 {
     for (;;) {
-        if (B.job.pending) {
+        /* a timed transmission starts TX_LEAD_US ahead of its time (the set-up, then the wait in the library);
+         * until then, receiving goes on */
+        const int64_t until = B.job.pending && B.tx.at_us ? B.tx.at_us - TX_LEAD_US - esp_timer_get_time() : 0;
+        if (B.job.pending && until <= 0) {
             run_tx();
             continue;
         }
         if (!B.streaming) {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+            ulTaskNotifyTake(pdTRUE, until > 0 ? pdMS_TO_TICKS(until / 1000) : pdMS_TO_TICKS(100));
             continue;
         }
         if (B.wanting)
             vTaskDelay(1); /* the mutex alone would go straight back to the reader */
         lock();
-        if (!B.streaming || B.job.pending) {
+        if (!B.streaming || (B.job.pending && until <= 0)) {
             unlock();
             continue;
         }
@@ -372,7 +383,7 @@ size_t bridge_hello(uint8_t *p)
         .rom_minor = B.rom_minor,
         .rom_known = lr20xx_rom_find(B.rom_major, B.rom_minor) != NULL,
         .caps = B.chip_ok ? LR20XX_LINK_CAP_RX | LR20XX_LINK_CAP_TX | LR20XX_LINK_CAP_TX_STREAM |
-                                (CONFIG_LR20XX_IRQ_GPIO >= 0 ? LR20XX_LINK_CAP_IRQ : 0)
+                                LR20XX_LINK_CAP_TIME | (CONFIG_LR20XX_IRQ_GPIO >= 0 ? LR20XX_LINK_CAP_IRQ : 0)
                           : 0,
         .tx_max_samples = (uint32_t)(TX_BYTES / 2), /* buffered whole: I/Q's 2 bytes a sample, the others 1 (longer
                                                      * bursts stream, CAP_TX_STREAM) */
@@ -533,7 +544,8 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         const size_t sb = (size_t)lr20xx_tx_sample_bytes((lr20xx_tx_mode_t)t.mode);
         double p = t.power_dbm > B.board.b.tx_power_max ? B.board.b.tx_power_max : t.power_dbm;
         B.tx = (lr20xx_iq_tx_t){.mode = (lr20xx_tx_mode_t)t.mode, .center_hz = t.center_hz, .ppm = t.ppm,
-                                .rate = t.rate, .fdev_hz = t.fdev_hz, .power_dbm = p, .samples = t.samples};
+                                .rate = t.rate, .fdev_hz = t.fdev_hz, .power_dbm = p, .samples = t.samples,
+                                .at_us = t.at_us};
         B.tx_end = t.samples ? (size_t)t.samples * sb : SIZE_MAX; /* 0 samples: streamed, until TX_COMMIT */
         B.tx_in = 0;
         B.tx_first_us = 0;
@@ -547,9 +559,11 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         B.tx_open = false;
         if (B.tx_end == SIZE_MAX)
             __atomic_store_n(&B.tx_end, B.tx_in, __ATOMIC_RELEASE);
+        const bool late = B.tx_started && !B.job.running && B.job.stats.late; /* what's still coming has nowhere
+                                                                                 * to go */
         if ((B.tx_in != B.tx_end || B.tx_over || !B.tx_in) && !B.tx_started)
             return LR20XX_ERR_INVALID_SIZE;
-        if (B.tx_in != B.tx_end || B.tx_over) {
+        if ((B.tx_in != B.tx_end || B.tx_over) && !late) {
             tx_cancel();
             return LR20XX_ERR_INVALID_SIZE;
         }
@@ -559,14 +573,21 @@ static lr20xx_err_t command(bridge_link_t *l, uint16_t cmd, const uint8_t *a, si
         B.tx_started = false;
         const lr20xx_tx_stream_stats_t *s = &B.job.stats;
         const lr20xx_link_tx_result_t r = {.runs = s->runs, .sent = (uint32_t)s->sent, .tx_flags = s->tx_flags,
-                                           .early = s->early, .timed_out = s->timed_out};
+                                           .early = s->early, .timed_out = s->timed_out,
+                                           .key_us = s->late ? 0 : s->key_us, .late = s->late};
         *n = lr20xx_link_put_tx_result(ans, &r);
+        if (s->late)
+            return LR20XX_OK; /* said in the result */
         if (B.job.e == LR20XX_OK && s->sent < B.tx_end)
             return LR20XX_ERR_TIMEOUT; /* the data stopped coming for a second */
         return B.job.e;
     }
     case LR20XX_CMD_TX_ABORT:
         tx_cancel();
+        return LR20XX_OK;
+    case LR20XX_CMD_TIME:
+        lr20xx_link_put_u64(ans, (uint64_t)esp_timer_get_time());
+        *n = 8;
         return LR20XX_OK;
     default:
         break;
@@ -801,13 +822,16 @@ int bridge_status_json(char *buf, size_t n)
     if (k >= (int)n)
         return k;
     /* the last burst (lr20xx_tx_stream_stats_t): restart_us is the longest from a TX_DONE seen to the next SetTx; key_ms
-     * from its first TX_DATA to key-up */
+     * from its first TX_DATA to key-up; setup_us from the transmission's start to its FIFO prefilled; timed: late (not
+     * sent) and key_late_us, its first SetTx past the time asked */
     const lr20xx_tx_stream_stats_t *t = &B.job.stats;
     return k + snprintf(buf + k, n - k,
                         ",\"tx\":{\"result\":%d,\"runs\":%d,\"refills\":%u,\"restart_us\":%" PRIu32
                         ",\"gap_us\":%" PRIu32 ",\"done_level\":%d,\"flags\":%u,\"sent\":%u,\"starved\":%u,\"queued\":%u,\"refused\":%u,"
-                        "\"cut\":%d,\"stopped\":%d,\"key_ms\":%lld}",
+                        "\"cut\":%d,\"stopped\":%d,\"key_ms\":%lld,\"setup_us\":%" PRId32 ",\"late\":%d,"
+                        "\"key_late_us\":%" PRId32 "}",
                         (int)B.job.e, t->runs, t->refills, t->restart_us, t->gap_us, t->done_level, t->tx_flags,
                         (unsigned)t->sent, t->starved, t->queued, t->refused, t->cut, t->stopped,
-                        (long long)(B.tx_first_us && t->key_us ? (t->key_us - B.tx_first_us) / 1000 : -1));
+                        (long long)(B.tx_first_us && t->key_us ? (t->key_us - B.tx_first_us) / 1000 : -1),
+                        B.job.setup_us, t->late, B.job.key_late_us);
 }

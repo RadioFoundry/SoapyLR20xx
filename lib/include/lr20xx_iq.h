@@ -151,6 +151,8 @@ typedef struct {
     bool streamed;          /* fed as it goes: the pull may answer LR20XX_TX_PULL_WAIT, and the end isn't padded but
                              * cut where the data ends */
     const volatile bool *stop; /* set: the transmission ends at once (NULL: none) */
+    int64_t at_us;          /* key up then (lr20xx_now_us; 0: when ready); ready too late, nothing is sent and
+                             * stats.late is set (lr20xx_tx_stream_cfg_t.at_us) */
 } lr20xx_iq_tx_t;
 
 /* One transmission, half duplex: a receive session is paused (no reset or new calibration where it already

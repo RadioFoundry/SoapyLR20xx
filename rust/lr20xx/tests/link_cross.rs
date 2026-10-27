@@ -72,6 +72,7 @@ fn payloads_match_c() {
         fdev_hz: 2048,
         power_dbm: -9.5,
         samples: 123456789012,
+        at_us: -7,
     };
     let c = c_bytes(link::TX_BEGIN_SIZE, |p| unsafe { sys::lr20xx_link_put_tx_begin(p, &tb) });
     assert_eq!(
@@ -83,14 +84,26 @@ fn payloads_match_c() {
             rate: 48000,
             fdev_hz: 2048,
             power_dbm: -9.5,
-            samples: 123456789012
+            samples: 123456789012,
+            at_us: -7
         }
         .to_bytes()
     );
 
-    let tr = sys::lr20xx_link_tx_result_t { runs: -2, sent: 70000, tx_flags: 0x20, early: 1, timed_out: 0 };
+    let tr = sys::lr20xx_link_tx_result_t {
+        runs: -2,
+        sent: 70000,
+        tx_flags: 0x20,
+        early: 1,
+        timed_out: 0,
+        key_us: 1 << 40,
+        late: 1,
+    };
     let c = c_bytes(link::TX_RESULT_SIZE, |p| unsafe { sys::lr20xx_link_put_tx_result(p, &tr) });
-    assert_eq!(c, link::TxResult { runs: -2, sent: 70000, tx_flags: 0x20, early: 1, timed_out: 0 }.to_bytes());
+    let r = link::TxResult { runs: -2, sent: 70000, tx_flags: 0x20, early: 1, timed_out: 0, key_us: 1 << 40, late: 1 };
+    assert_eq!(c, r.to_bytes());
+    // an older device's: no key_us or late
+    assert_eq!(link::TxResult::get(&c[..11]), Some(link::TxResult { key_us: 0, late: 0, ..r }));
 
     let st = sys::lr20xx_link_stats_t {
         samples: 1 << 33,

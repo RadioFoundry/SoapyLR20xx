@@ -61,6 +61,7 @@ typedef enum {
                                     * receiving (a debug path: the chip's state is the host's problem after it) */
     LR20XX_CMD_STATS = 0x0040,     /* -> lr20xx_link_stats_t */
     LR20XX_CMD_TEMP = 0x0041,      /* -> f32 degrees C; not while receiving */
+    LR20XX_CMD_TIME = 0x0042,      /* -> i64 the device's clock, us (RX_DATA's t_us, TX_BEGIN's at_us); CAP_TIME */
 } lr20xx_link_cmd_t;
 
 typedef struct {
@@ -79,6 +80,7 @@ typedef struct {
 #define LR20XX_LINK_CAP_TX 0x02
 #define LR20XX_LINK_CAP_IRQ 0x04
 #define LR20XX_LINK_CAP_TX_STREAM 0x08 /* TX_BEGIN with 0 samples streams until TX_COMMIT; any length */
+#define LR20XX_LINK_CAP_TIME 0x10      /* CMD_TIME answers; TX_BEGIN's at_us is kept to */
 
 typedef struct {
     double rate;
@@ -112,6 +114,7 @@ typedef struct {
     uint32_t fdev_hz;
     float power_dbm;
     uint64_t samples; /* the length; TX_DATA must bring exactly this many */
+    int64_t at_us;    /* key up then, on the device's clock (CAP_TIME; 0: once enough has come in) */
 } lr20xx_link_tx_begin_t;
 
 typedef struct {
@@ -119,6 +122,8 @@ typedef struct {
     uint32_t sent;    /* bytes into the FIFO */
     uint8_t tx_flags; /* the TX FIFO's flags at the end (0x20: it ran dry, the waveform broke) */
     uint8_t early, timed_out;
+    int64_t key_us;   /* the first SetTx went out then, on the device's clock (0: not keyed) */
+    uint8_t late;     /* at_us had passed by more than LR20XX_TX_LATE_US when it was ready: nothing sent */
 } lr20xx_link_tx_result_t;
 
 typedef struct {
@@ -148,8 +153,8 @@ size_t lr20xx_link_tx_data(uint8_t *buf, size_t cap, const uint8_t *samples, siz
 #define LR20XX_LINK_HELLO_SIZE 106
 #define LR20XX_LINK_RX_CONFIG_SIZE 26
 #define LR20XX_LINK_PLAN_SIZE 18
-#define LR20XX_LINK_TX_BEGIN_SIZE 37
-#define LR20XX_LINK_TX_RESULT_SIZE 11
+#define LR20XX_LINK_TX_BEGIN_SIZE 45  /* 37 before at_us: taken as at_us 0 */
+#define LR20XX_LINK_TX_RESULT_SIZE 20 /* 11 before key_us and late: taken as 0 */
 #define LR20XX_LINK_STATS_SIZE 36
 size_t lr20xx_link_put_hello(uint8_t *p, const lr20xx_link_hello_t *v);
 bool lr20xx_link_get_hello(const uint8_t *p, size_t n, lr20xx_link_hello_t *v);

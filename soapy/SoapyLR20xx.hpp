@@ -10,6 +10,7 @@
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Types.hpp>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -89,6 +90,10 @@ public:
         return transmit(b, d);
     }
     virtual void tx_abort() { tx_d_.clear(); }
+    /* The device's clock (RX_DATA's t_us, TX_BEGIN's at_us), us; timed() false: it has none to read (a bridge before
+     * LR20XX_LINK_CAP_TIME), and now_us throws. */
+    virtual bool timed() { return false; }
+    virtual int64_t now_us() { throw Error(LR20XX_ERR_NOT_SUPPORTED, "LR20xx: the device's clock can't be read"); }
     virtual std::vector<uint32_t> read_reg(uint32_t addr, int n) = 0;
     virtual void write_reg(uint32_t addr, uint32_t value) = 0;
     virtual float temperature() = 0;
@@ -181,6 +186,10 @@ public:
     double getBandwidth(const int dir, const size_t ch) const override;
     std::vector<double> listBandwidths(const int dir, const size_t ch) const override;
 
+    bool hasHardwareTime(const std::string &what) const override;
+    long long getHardwareTime(const std::string &what) const override;
+    void setHardwareTime(const long long timeNs, const std::string &what) override;
+
     std::vector<std::string> listSensors() const override { return {"temperature"}; }
     SoapySDR::ArgInfo getSensorInfo(const std::string &key) const override;
     std::string readSensor(const std::string &key) const override;
@@ -222,6 +231,8 @@ private:
     double tx_rate_ = 48000, tx_fdev_ = 2048, tx_power_ = 0, tx_center_ = 0, polar_rmin_ = 0.2;
     RxStream *rx_ = nullptr;
     TxStream *tx_ = nullptr;
+    /* time: the device's clock in ns plus this (setHardwareTime) */
+    std::atomic<long long> time_offset_{0};
 };
 
 } // namespace soapy_lr20xx

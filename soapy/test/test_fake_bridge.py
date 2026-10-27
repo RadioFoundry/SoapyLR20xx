@@ -25,7 +25,8 @@ args = ap.parse_args()
 os.environ["SOAPY_SDR_PLUGIN_PATH"] = os.path.abspath(args.module_dir)
 try:
     import SoapySDR
-    from SoapySDR import SOAPY_SDR_CF32, SOAPY_SDR_END_BURST, SOAPY_SDR_OVERFLOW, SOAPY_SDR_RX, SOAPY_SDR_TX
+    from SoapySDR import (SOAPY_SDR_CF32, SOAPY_SDR_END_BURST, SOAPY_SDR_HAS_TIME, SOAPY_SDR_NOT_SUPPORTED, SOAPY_SDR_OVERFLOW, SOAPY_SDR_RX,
+                          SOAPY_SDR_TIME_ERROR, SOAPY_SDR_TX)
 except ImportError:
     print("no SoapySDR Python bindings: skipped")
     sys.exit(77)
@@ -110,11 +111,15 @@ try:
     f = cmath.phase(acc) * rate / (2 * math.pi)
     check(abs(f - TONE) < 200, "tone %.0f Hz, want %.0f" % (f, TONE))
     check(abs(abs(x[100]) - 2000 / 32768) < 0.01, "level %f" % abs(x[100]))
-    # the timestamps rise by the samples between, jumping where samples were lost
-    ok = all(t1 >= t0 + n0 * 1e9 / rate - 1 for (t0, n0), (t1, _) in zip(times, times[1:]))
-    check(ok, "timestamps rise")
-    jumps = sum(1 for (t0, n0), (t1, _) in zip(times, times[1:]) if t1 > t0 + n0 * 1e9 / rate + 1000)
-    check(jumps >= 1, "a gap shows in the timestamps (%d)" % jumps)
+    # the timestamps rise by the samples between, jumping where samples were lost by about their time (the fake loses
+    # 509, 2.04 ms at 250 kS/s; the index doesn't count them, the device's clock does; its reads end 50-400 us late)
+    ok = all(t1 > t0 + (n0 - 1) * 1e9 / rate for (t0, n0), (t1, _) in zip(times, times[1:]))
+    check(ok, "timestamps rise (each read's first after the last's last)")
+    steps = [t1 - t0 - n0 * 1e9 / rate for (t0, n0), (t1, _) in zip(times, times[1:])]
+    jumps = [s for s in steps if s > 1e6]
+    check(len(jumps) >= 1 and all(1.8e6 < s < 2.3e6 for s in jumps), "the gaps' time in the timestamps (%s us)" %
+          [round(s / 1000) for s in jumps])
+    check(all(abs(s) < 1e9 / rate or s > 1e6 for s in steps), "no other jumps: %s" % [round(s) for s in steps if not (abs(s) < 1e9 / rate or s > 1e6)])
 
     # int8 through the converter
     sdr.writeSetting("iq_mode", "conv8")
@@ -157,6 +162,36 @@ try:
     # 1 kHz at 2048 / 64 = 32 Hz a count: 31 counts
     counts = [b - 256 if b > 127 else b for b in d[1:]]
     check(all(abs(c - 31) <= 1 for c in counts[1:]), "FREQ samples %s" % counts[:5])
+
+    # timed: the device's clock, a burst kept to its time, one asked for too late refused (a bridge before
+    # CAP_TIME: none)
+    old = "--no-tx-stream" in os.environ.get("LR20XX_FAKE_ARGS", "")
+    if old:
+        check(not sdr.hasHardwareTime(""), "no hardware time")
+        tx = sdr.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CF32)
+        r = sdr.writeStream(tx, [tb], n, SOAPY_SDR_END_BURST | SOAPY_SDR_HAS_TIME, 10**9, timeoutUs=1000000)
+        check(r.ret == SOAPY_SDR_NOT_SUPPORTED, "timed without a clock: %d" % r.ret)
+        sdr.closeStream(tx)
+    else:
+        check(sdr.hasHardwareTime(""), "hardware time")
+        sdr.setHardwareTime(5 * 10**9, "")
+        now = sdr.getHardwareTime("")
+        check(abs(now - 5 * 10**9) < 20e6, "setHardwareTime: %d" % now)
+        tx = sdr.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CF32)
+        sdr.activateStream(tx)
+        at = sdr.getHardwareTime("") + 300 * 10**6
+        r = sdr.writeStream(tx, [tb], n, SOAPY_SDR_END_BURST | SOAPY_SDR_HAS_TIME, at, timeoutUs=1000000)
+        check(r.ret == n, "timed writeStream %d" % r.ret)
+        st = sdr.readStreamStatus(tx, timeoutUs=3000000)
+        check(st.ret == 0 and st.flags & SOAPY_SDR_END_BURST and st.flags & SOAPY_SDR_HAS_TIME and
+              0 <= st.timeNs - at < 20e6, "timed burst: %d %d, keyed %.1f ms after its time" %
+              (st.ret, st.flags, (st.timeNs - at) / 1e6))
+        r = sdr.writeStream(tx, [tb], n, SOAPY_SDR_END_BURST | SOAPY_SDR_HAS_TIME, sdr.getHardwareTime("") - 10**8,
+                            timeoutUs=1000000)
+        st = sdr.readStreamStatus(tx, timeoutUs=3000000)
+        check(st.ret == SOAPY_SDR_TIME_ERROR, "late: %d" % st.ret)
+        sdr.deactivateStream(tx)
+        sdr.closeStream(tx)
 
     # a streamed burst: written in parts, it must go out as the same burst written whole, in each mode (iq_polar's
     # dips under rmin cross the parts' edges)

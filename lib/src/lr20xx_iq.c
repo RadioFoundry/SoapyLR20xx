@@ -552,6 +552,7 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
             .cut_end = tx->streamed && tx->mode != LR20XX_TX_CW,
             .stop = tx->stop,
             .learned = iq->tx_learned,
+            .at_us = tx->at_us,
         };
         const uint32_t key = (uint32_t)tx->mode << 24 ^ tx->rate;
         if (iq->tx_learned_for != key) {

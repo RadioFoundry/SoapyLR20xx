@@ -252,12 +252,13 @@ size_t lr20xx_link_put_tx_begin(uint8_t *p, const lr20xx_link_tx_begin_t *v)
     lr20xx_link_put_u32(p + 21, v->fdev_hz);
     lr20xx_link_put_f32(p + 25, v->power_dbm);
     lr20xx_link_put_u64(p + 29, v->samples);
+    lr20xx_link_put_u64(p + 37, (uint64_t)v->at_us);
     return LR20XX_LINK_TX_BEGIN_SIZE;
 }
 
 bool lr20xx_link_get_tx_begin(const uint8_t *p, size_t n, lr20xx_link_tx_begin_t *v)
 {
-    if (n < LR20XX_LINK_TX_BEGIN_SIZE)
+    if (n < 37)
         return false;
     v->mode = p[0];
     v->center_hz = lr20xx_link_f64(p + 1);
@@ -266,6 +267,7 @@ bool lr20xx_link_get_tx_begin(const uint8_t *p, size_t n, lr20xx_link_tx_begin_t
     v->fdev_hz = lr20xx_link_u32(p + 21);
     v->power_dbm = lr20xx_link_f32(p + 25);
     v->samples = lr20xx_link_u64(p + 29);
+    v->at_us = n >= LR20XX_LINK_TX_BEGIN_SIZE ? (int64_t)lr20xx_link_u64(p + 37) : 0;
     return true;
 }
 
@@ -276,18 +278,22 @@ size_t lr20xx_link_put_tx_result(uint8_t *p, const lr20xx_link_tx_result_t *v)
     p[8] = v->tx_flags;
     p[9] = v->early;
     p[10] = v->timed_out;
+    lr20xx_link_put_u64(p + 11, (uint64_t)v->key_us);
+    p[19] = v->late;
     return LR20XX_LINK_TX_RESULT_SIZE;
 }
 
 bool lr20xx_link_get_tx_result(const uint8_t *p, size_t n, lr20xx_link_tx_result_t *v)
 {
-    if (n < LR20XX_LINK_TX_RESULT_SIZE)
+    if (n < 11)
         return false;
     v->runs = (int32_t)lr20xx_link_u32(p);
     v->sent = lr20xx_link_u32(p + 4);
     v->tx_flags = p[8];
     v->early = p[9];
     v->timed_out = p[10];
+    v->key_us = n >= LR20XX_LINK_TX_RESULT_SIZE ? (int64_t)lr20xx_link_u64(p + 11) : 0;
+    v->late = n >= LR20XX_LINK_TX_RESULT_SIZE ? p[19] : 0;
     return true;
 }
 

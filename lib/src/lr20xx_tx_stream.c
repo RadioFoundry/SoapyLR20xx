@@ -69,6 +69,20 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
     if ((e = lr20xx_write_tx_fifo(d, buf, n)) != LR20XX_OK)
         goto out;
     st->sent = n;
+    st->ready_us = lr20xx_now_us();
+    if (c->at_us) {
+        /* a timed start: asleep until just before it (a tick's sleep can end early, a timer's late), the last
+         * 30 us spun (lr20xx_sleep_us spins that short) */
+        int64_t now = lr20xx_now_us();
+        if (now > c->at_us + LR20XX_TX_LATE_US) {
+            st->late = true;
+            st->sent = 0;
+            lr20xx_write(d, f, lr20xx_cmd(f, LR20XX_CLEAR_TX_FIFO));
+            goto out;
+        }
+        for (; now < c->at_us; now = lr20xx_now_us())
+            lr20xx_sleep_us((uint32_t)(c->at_us - now >= 60 ? c->at_us - now - 30 : c->at_us - now > 25 ? 25 : c->at_us - now));
+    }
     if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)
         goto out;
     st->key_us = lr20xx_now_us();

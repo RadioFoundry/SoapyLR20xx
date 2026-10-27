@@ -167,6 +167,9 @@ pub struct TxConfig {
     pub samples: u64,
     /// 0: the default.
     pub max_ms: i32,
+    /// Key up then ([`crate::now_us`]'s clock; 0: when ready). Ready too late, nothing is sent and
+    /// [`TxStats::late`] is set.
+    pub at_us: i64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -179,6 +182,8 @@ pub struct TxStats {
     pub timed_out: bool,
     pub key_us: i64,
     pub end_us: i64,
+    /// [`TxConfig::at_us`] had passed when it was ready: nothing was sent.
+    pub late: bool,
 }
 
 /// An SDR on a device: the device is borrowed for the session's life.
@@ -312,6 +317,7 @@ impl<'d> IqSession<'d> {
             max_ms: tx.max_ms,
             streamed: false,
             stop: std::ptr::null(),
+            at_us: tx.at_us,
         };
         let mut s: sys::lr20xx_tx_stream_stats_t = unsafe { std::mem::zeroed() };
         let e = unsafe {
@@ -333,6 +339,7 @@ impl<'d> IqSession<'d> {
             timed_out: s.timed_out,
             key_us: s.key_us,
             end_us: s.end_us,
+            late: s.late,
         })
     }
 }

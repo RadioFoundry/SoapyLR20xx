@@ -35,6 +35,8 @@ pub mod cmd {
     pub const RAW: u16 = 0x0032;
     pub const STATS: u16 = 0x0040;
     pub const TEMP: u16 = 0x0041;
+    /// The device's clock, us (RX_DATA's `t_us`, TX_BEGIN's `at_us`); with [`super::CAP_TIME`].
+    pub const TIME: u16 = 0x0042;
 }
 
 pub const CAP_RX: u8 = 0x01;
@@ -42,6 +44,8 @@ pub const CAP_TX: u8 = 0x02;
 pub const CAP_IRQ: u8 = 0x04;
 /// TX_BEGIN with 0 samples streams until TX_COMMIT; a burst of any length.
 pub const CAP_TX_STREAM: u8 = 0x08;
+/// TIME answers; TX_BEGIN's `at_us` is kept to.
+pub const CAP_TIME: u8 = 0x10;
 /// RX_DATA flag: samples were lost ahead of these.
 pub const FLAG_GAP: u8 = 0x01;
 pub const EVENT_RX_FAILED: u16 = 1;
@@ -51,8 +55,10 @@ pub const HELLO_SIZE: usize = 106;
 pub const RX_CONFIG_SIZE: usize = 26;
 pub const PLAN_SIZE: usize = 18;
 pub const RX_HDR_SIZE: usize = 19;
-pub const TX_BEGIN_SIZE: usize = 37;
-pub const TX_RESULT_SIZE: usize = 11;
+/// 37 before `at_us`: read as `at_us` 0.
+pub const TX_BEGIN_SIZE: usize = 45;
+/// 11 before `key_us` and `late`: read as 0.
+pub const TX_RESULT_SIZE: usize = 20;
 pub const STATS_SIZE: usize = 36;
 
 fn u16_at(p: &[u8], o: usize) -> u16 {
@@ -264,6 +270,8 @@ pub struct TxBegin {
     pub fdev_hz: u32,
     pub power_dbm: f32,
     pub samples: u64,
+    /// Key up then, on the device's clock ([`CAP_TIME`]; 0: once enough has come in).
+    pub at_us: i64,
 }
 
 impl Payload for TxBegin {
@@ -276,9 +284,10 @@ impl Payload for TxBegin {
         o.extend_from_slice(&self.fdev_hz.to_le_bytes());
         o.extend_from_slice(&self.power_dbm.to_le_bytes());
         o.extend_from_slice(&self.samples.to_le_bytes());
+        o.extend_from_slice(&self.at_us.to_le_bytes());
     }
     fn get(p: &[u8]) -> Option<Self> {
-        if p.len() < Self::SIZE {
+        if p.len() < 37 {
             return None;
         }
         Some(TxBegin {
@@ -289,6 +298,7 @@ impl Payload for TxBegin {
             fdev_hz: u32_at(p, 21),
             power_dbm: f32_at(p, 25),
             samples: u64_at(p, 29),
+            at_us: if p.len() >= Self::SIZE { u64_at(p, 37) as i64 } else { 0 },
         })
     }
 }
@@ -300,6 +310,10 @@ pub struct TxResult {
     pub tx_flags: u8,
     pub early: u8,
     pub timed_out: u8,
+    /// The first SetTx went out then, on the device's clock (0: not keyed).
+    pub key_us: i64,
+    /// `at_us` had passed when it was ready: nothing was sent.
+    pub late: u8,
 }
 
 impl Payload for TxResult {
@@ -308,12 +322,23 @@ impl Payload for TxResult {
         o.extend_from_slice(&self.runs.to_le_bytes());
         o.extend_from_slice(&self.sent.to_le_bytes());
         o.extend_from_slice(&[self.tx_flags, self.early, self.timed_out]);
+        o.extend_from_slice(&self.key_us.to_le_bytes());
+        o.push(self.late);
     }
     fn get(p: &[u8]) -> Option<Self> {
-        if p.len() < Self::SIZE {
+        if p.len() < 11 {
             return None;
         }
-        Some(TxResult { runs: u32_at(p, 0) as i32, sent: u32_at(p, 4), tx_flags: p[8], early: p[9], timed_out: p[10] })
+        let new = p.len() >= Self::SIZE;
+        Some(TxResult {
+            runs: u32_at(p, 0) as i32,
+            sent: u32_at(p, 4),
+            tx_flags: p[8],
+            early: p[9],
+            timed_out: p[10],
+            key_us: if new { u64_at(p, 11) as i64 } else { 0 },
+            late: if new { p[19] } else { 0 },
+        })
     }
 }
 

@@ -40,8 +40,10 @@ fn frames() {
         fdev_hz: 2048,
         power_dbm: -9.5,
         samples: 1 << 40,
+        at_us: 123,
     };
     assert_eq!(TxBegin::get(&t.to_bytes()), Some(t));
+    assert_eq!(TxBegin::get(&t.to_bytes()[..37]), Some(TxBegin { at_us: 0, ..t }), "an older host's: at once");
     let p = Plan { mode: 2, format: 0, rate_num: 2_000_000, rate_den: 3, passband_hz: 1e5 };
     assert_eq!(Plan::get(&p.to_bytes()), Some(p));
     assert!(Plan::get(&p.to_bytes()[..17]).is_none());

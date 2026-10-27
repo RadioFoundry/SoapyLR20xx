@@ -115,7 +115,11 @@ typedef struct {
     int *learned;           /* irq_pin: TX_DONE's delay past a run's length for runs started on the pin, queued, and
                              * the first (from standby), us (-1: not known), carried from one call to the next with
                              * the same setup (NULL: learned afresh, R3.47) */
+    int64_t at_us;          /* key up then (lr20xx_now_us), the FIFO prefilled before; past it by more than
+                             * LR20XX_TX_LATE_US when ready: nothing sent, stats.late (0: at once) */
 } lr20xx_tx_stream_cfg_t;
+
+#define LR20XX_TX_LATE_US 100
 
 typedef struct {
     int runs;               /* TX_DONEs seen */
@@ -134,6 +138,8 @@ typedef struct {
                              * behind (the chip held its last sample, R3.13) */
     bool cut;               /* the last run was cut when its data ran out (cfg.cut_end) */
     bool stopped;           /* cfg.stop ended it */
+    bool late;              /* ready past cfg.at_us: nothing was sent */
+    int64_t ready_us;       /* the FIFO prefilled, ready to key up (cfg.at_us: before the wait for it) */
 } lr20xx_tx_stream_stats_t;
 
 /* Clear the TX FIFO, prefill it from pull, key up with cfg.start, keep the FIFO topped up, and start each next run

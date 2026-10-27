@@ -660,6 +660,18 @@ static void transmit_front_end(void)
     CHECK(e == LR20XX_OK && key > 0 && held > 0 && back > key, "the front end held in TX, then its table (%d %d %d)",
           held, key, back);
     CHECK(st.done_level == -1 && st.restart_us == 0, "one run: no restarts");
+
+    /* timed: keyed up at the time asked; past it, nothing sent */
+    tx.at_us = F.now_us + 50000;
+    pull_n = 4800;
+    e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    CHECK(e == LR20XX_OK && !st.late && st.key_us >= tx.at_us && st.key_us - tx.at_us < 20 && st.runs == 1,
+          "timed: keyed %lld us after the time asked", (long long)(st.key_us - tx.at_us));
+    M.n_ops = 0;
+    tx.at_us = F.now_us - 1000;
+    pull_n = 4800;
+    e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    CHECK(e == LR20XX_OK && st.late && st.runs == 0 && find_op(LR20XX_SET_TX, 0) < 0, "late: nothing sent (%d)", e);
     lr20xx_close(d);
 }
 

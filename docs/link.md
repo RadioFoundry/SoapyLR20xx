@@ -57,14 +57,15 @@ so the host can't tell how many were lost; the bridge time can.
 | 0x0011 RX_START | | (RX_DATA follows) |
 | 0x0012 RX_STOP | | (no RX_DATA after the answer) |
 | 0x0013 SET_GAIN | i8 step: 0 the AGC, 1 to 13 | |
-| 0x0020 TX_BEGIN | mode, center, ppm, rate, fdev, power (f32 dBm), samples (u64) | (TX_DATA follows) |
-| 0x0021 TX_COMMIT | | once the burst has gone out: runs, bytes, TX FIFO flags, early, timed out |
+| 0x0020 TX_BEGIN | mode, center, ppm, rate, fdev, power (f32 dBm), samples (u64), at_us (i64) | (TX_DATA follows) |
+| 0x0021 TX_COMMIT | | once the burst has gone out: runs, bytes, TX FIFO flags, early, timed out, key_us (i64), late |
 | 0x0022 TX_ABORT | | |
 | 0x0030 READ_REG | u32 address, u8 count (1 to 64) | the words |
 | 0x0031 WRITE_REG | u32 address, u32 value | |
 | 0x0032 RAW | u16 answer bytes, a command frame | the status bytes, the answer |
 | 0x0040 STATS | | samples, losses, restarts, errors, reads, IRQs late, link drops, ring peak |
 | 0x0041 TEMP | | f32 °C |
+| 0x0042 TIME | | i64 the device's clock, us |
 
 READ_REG, WRITE_REG, RAW and TEMP are refused (`LR20XX_ERR_INVALID_STATE`) while receiving. RAW is a debug path:
 after it, the chip's state is the host's problem.
@@ -78,3 +79,10 @@ reading the link, and the link's flow control holds the host. A burst that runs 
 after a second with nothing, the bridge ends it and TX_COMMIT answers `LR20XX_ERR_TIMEOUT`. Without TX_STREAM, the
 bridge buffers the whole burst first, and HELLO's `tx_max_samples` is the most it takes. Reception pauses for the
 burst and resumes after it, with a gap.
+
+Time: RX_DATA's `t_us`, TIME's answer, `at_us` and `key_us` are one clock, the bridge's since it booted. With
+capability 0x10 (TIME), a TX_BEGIN `at_us` other than 0 keys up then: reception goes on until 10 ms before, the FIFO
+is filled, and the SetTx goes out at `at_us` (the signal follows by the chip's start-up). Ready more than 100 us past
+it (`LR20XX_TX_LATE_US`), nothing is sent: TX_COMMIT answers with `late` 1 and `key_us` 0. `key_us` is when the
+first SetTx went out. TX_BEGIN's `at_us` and TX_COMMIT's `key_us` and `late` came with TIME: a shorter TX_BEGIN
+(37 bytes) is untimed, a shorter answer (11 bytes) has them 0.

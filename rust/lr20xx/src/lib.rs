@@ -30,3 +30,8 @@ pub use iq::{
 
 /// The raw bindings, for what the safe API doesn't cover.
 pub use lr20xx_sys as sys;
+
+/// The library's clock, us: what [`iq::TxConfig::at_us`] and the receive callback's times are on.
+pub fn now_us() -> i64 {
+    unsafe { sys::lr20xx_now_us() }
+}

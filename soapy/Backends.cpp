@@ -37,6 +37,7 @@
 
 #include "lr20xx_hal_linux.h"
 #include "lr20xx_iq.h"
+#include "lr20xx_port.h"
 #include "lr20xx_radio.h"
 #endif
 
@@ -182,7 +183,7 @@ public:
         }
         /* the answer comes once it has gone out: its length plus a margin */
         const double secs = b.rate ? (double)b.samples / b.rate : 0;
-        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, secs + 5);
+        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, secs + wait_s(b) + 5);
         lr20xx_link_tx_result_t r{};
         if (!lr20xx_link_get_tx_result(a.data(), a.size(), &r))
             throw Error(-1, "LR20xx: short TX_COMMIT answer");
@@ -223,7 +224,7 @@ public:
             return Backend::tx_commit();
         /* the answer comes once it has gone out: at most all of it still to send, plus a margin */
         const double bps = (double)tx_b_.rate * (tx_b_.mode == LR20XX_TX_FREQ || tx_b_.mode == LR20XX_TX_PHASE_STEP ? 1 : 2);
-        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, (bps > 0 ? (double)tx_sent_ / bps : 0) + 5);
+        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, (bps > 0 ? (double)tx_sent_ / bps : 0) + wait_s(tx_b_) + 5);
         lr20xx_link_tx_result_t r{};
         if (!lr20xx_link_get_tx_result(a.data(), a.size(), &r))
             throw Error(-1, "LR20xx: short TX_COMMIT answer");
@@ -257,6 +258,24 @@ public:
         lr20xx_link_put_u32(p, addr);
         lr20xx_link_put_u32(p + 4, value);
         request(LR20XX_CMD_WRITE_REG, p, sizeof p);
+    }
+
+    bool timed() override { return caps_ & LR20XX_LINK_CAP_TIME; }
+
+    int64_t now_us() override
+    {
+        if (!timed())
+            return Backend::now_us();
+        auto a = request(LR20XX_CMD_TIME, nullptr, 0);
+        if (a.size() < 8)
+            throw Error(-1, "LR20xx: short TIME answer");
+        return (int64_t)lr20xx_link_u64(a.data());
+    }
+
+    /* A timed burst's wait before it starts, s (0: untimed) */
+    double wait_s(const lr20xx_link_tx_begin_t &b)
+    {
+        return b.at_us && timed() ? std::max(0.0, (double)(b.at_us - now_us()) / 1e6) : 0;
     }
 
     float temperature() override
@@ -796,8 +815,14 @@ public:
 
     ChunkQueue &queue() override { return q_; }
 
+    bool timed() override { return true; }
+    int64_t now_us() override { return lr20xx_now_us(); }
+
     lr20xx_link_tx_result_t transmit(const lr20xx_link_tx_begin_t &b, const std::vector<uint8_t> &data) override
     {
+        /* timed: receiving goes on until 10 ms ahead (the set-up), then the library waits for the time */
+        if (b.at_us && b.at_us - lr20xx_now_us() > 10000)
+            std::this_thread::sleep_for(std::chrono::microseconds(b.at_us - lr20xx_now_us() - 10000));
         std::lock_guard<std::mutex> l(m_);
         if (!inited_)
             init();
@@ -809,6 +834,7 @@ public:
         t.fdev_hz = b.fdev_hz;
         t.power_dbm = b.power_dbm;
         t.samples = b.samples;
+        t.at_us = b.at_us;
         struct Src {
             const std::vector<uint8_t> *d;
             size_t off;
@@ -828,6 +854,8 @@ public:
         r.tx_flags = st.tx_flags;
         r.early = st.early;
         r.timed_out = st.timed_out;
+        r.key_us = st.late ? 0 : st.key_us;
+        r.late = st.late;
         if (e != LR20XX_OK && !st.timed_out && !st.early)
             check(e, "transmit");
         return r;

@@ -196,6 +196,15 @@ impl<S: Read + Write> Client<S> {
         TxResult::get(&a).ok_or(Error::Protocol("short TX result"))
     }
 
+    /// The device's clock, us (needs [`crate::CAP_TIME`] in the HELLO's caps).
+    pub fn time_us(&mut self) -> Result<i64> {
+        let a = self.request(cmd::TIME, &[])?;
+        if a.len() < 8 {
+            return Err(Error::Protocol("short TIME answer"));
+        }
+        Ok(i64::from_le_bytes(a[..8].try_into().unwrap()))
+    }
+
     pub fn tx_abort(&mut self) -> Result<()> {
         self.request(cmd::TX_ABORT, &[]).map(|_| ())
     }

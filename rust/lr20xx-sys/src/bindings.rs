@@ -151,6 +151,7 @@ pub struct lr20xx_tx_stream_cfg_t {
     pub cut_end: bool,
     pub stop: *const bool,
     pub learned: *mut ::core::ffi::c_int,
+    pub at_us: i64,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -171,6 +172,8 @@ pub struct lr20xx_tx_stream_stats_t {
     pub starved: ::core::ffi::c_uint,
     pub cut: bool,
     pub stopped: bool,
+    pub late: bool,
+    pub ready_us: i64,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -323,6 +326,7 @@ pub struct lr20xx_iq_tx_t {
     pub max_ms: ::core::ffi::c_int,
     pub streamed: bool,
     pub stop: *const bool,
+    pub at_us: i64,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -713,6 +717,7 @@ pub struct lr20xx_link_tx_begin_t {
     pub fdev_hz: u32,
     pub power_dbm: f32,
     pub samples: u64,
+    pub at_us: i64,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -722,6 +727,8 @@ pub struct lr20xx_link_tx_result_t {
     pub tx_flags: u8,
     pub early: u8,
     pub timed_out: u8,
+    pub key_us: i64,
+    pub late: u8,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -779,6 +786,7 @@ pub const LR20XX_ERR_TIMEOUT: u32 = 263;
 pub const LR20XX_ERR_INVALID_RESPONSE: u32 = 264;
 pub const LR20XX_ERR_INVALID_CRC: u32 = 265;
 pub const LR20XX_TICK_MS: u32 = 1;
+pub const LR20XX_TX_LATE_US: u32 = 100;
 pub const LR20XX_BOARD_RFSW_MAX: u32 = 4;
 pub const LR20XX_TX_MAX_RUN: u32 = 65535;
 pub const LR20XX_TX_FRAME_MAX: u32 = 13;
@@ -876,13 +884,14 @@ pub const LR20XX_LINK_CAP_RX: u32 = 1;
 pub const LR20XX_LINK_CAP_TX: u32 = 2;
 pub const LR20XX_LINK_CAP_IRQ: u32 = 4;
 pub const LR20XX_LINK_CAP_TX_STREAM: u32 = 8;
+pub const LR20XX_LINK_CAP_TIME: u32 = 16;
 pub const LR20XX_LINK_RX_HDR: u32 = 19;
 pub const LR20XX_LINK_GAP: u32 = 1;
 pub const LR20XX_LINK_HELLO_SIZE: u32 = 106;
 pub const LR20XX_LINK_RX_CONFIG_SIZE: u32 = 26;
 pub const LR20XX_LINK_PLAN_SIZE: u32 = 18;
-pub const LR20XX_LINK_TX_BEGIN_SIZE: u32 = 37;
-pub const LR20XX_LINK_TX_RESULT_SIZE: u32 = 11;
+pub const LR20XX_LINK_TX_BEGIN_SIZE: u32 = 45;
+pub const LR20XX_LINK_TX_RESULT_SIZE: u32 = 20;
 pub const LR20XX_LINK_STATS_SIZE: u32 = 36;
 pub const LR20XX_LINK_BITS_MIN: u32 = 4;
 pub const LR20XX_READ_RX_FIFO: _bindgen_ty_1 = 1;
@@ -1326,6 +1335,7 @@ pub const LR20XX_CMD_WRITE_REG: lr20xx_link_cmd_t = 49;
 pub const LR20XX_CMD_RAW: lr20xx_link_cmd_t = 50;
 pub const LR20XX_CMD_STATS: lr20xx_link_cmd_t = 64;
 pub const LR20XX_CMD_TEMP: lr20xx_link_cmd_t = 65;
+pub const LR20XX_CMD_TIME: lr20xx_link_cmd_t = 66;
 pub const LR20XX_EVENT_RX_FAILED: lr20xx_link_event_kind_t = 1;
 pub const LR20XX_EVENT_LOG: lr20xx_link_event_kind_t = 2;
 unsafe extern "C" {

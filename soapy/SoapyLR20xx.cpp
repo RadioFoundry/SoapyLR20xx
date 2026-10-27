@@ -8,6 +8,7 @@
 #include <SoapySDR/Registry.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstring>
@@ -53,6 +54,14 @@ struct Device::RxStream {
     size_t off = 0;
     bool active = false;
     uint32_t rate_num = 1, rate_den = 1;
+    /* The device's clock (ns) at sample index 0. Each chunk's t_us is when its read ended, so never before its last
+     * sample: base_ns is the lowest such bound, let rise slowly (the chip's sample clock and the device's drift
+     * apart by tens of ppm). After a loss (the index doesn't count the lost samples) it's set afresh from that one
+     * chunk, less a read's usual lateness past the bound (late_ns). The times given follow it from applied_ns, down
+     * by under a sample a chunk, so they never go back. */
+    bool anchored = false;
+    long double base_ns = 0, applied_ns = 0, late_ns = 0;
+    long double cur_ns = 0; /* the chunk being read: its first sample's time */
 };
 
 struct Device::TxStream {
@@ -67,7 +76,7 @@ struct Device::TxStream {
     bool has_ctx = false;
     float last_hz = 0;                       /* freq, phase_step: the last sample's */
     uint64_t over = 0, counted = 0;          /* past the mode's frequency limit, of those counted */
-    std::deque<std::pair<int, long long>> status; /* (flags or an error code, 0) */
+    std::deque<std::pair<int, long long>> status; /* (flags or an error code, the key-up's time or 0) */
     std::mutex m;
     std::condition_variable cv;
 };
@@ -196,6 +205,7 @@ int Device::activateStream(SoapySDR::Stream *s, const int flags, const long long
     b_->rx_start();
     rx_->cur = Chunk{};
     rx_->off = 0;
+    rx_->anchored = false;
     rx_->rate_num = plan_.rate_num;
     rx_->rate_den = plan_.rate_den ? plan_.rate_den : 1;
     rx_->active = true;
@@ -229,6 +239,26 @@ int Device::readStream(SoapySDR::Stream *s, void *const *buffs, const size_t num
             return SOAPY_SDR_TIMEOUT;
         }
         r->off = 0;
+        /* the chunk's time on the device's clock (RxStream's base_ns) */
+        const size_t n = r->cur.data.size() / (r->cur.format == 1 ? 2 : 4);
+        const long double per = 1e9L * r->rate_den / r->rate_num;
+        const long double bound = (long double)r->cur.t_us * 1000 - (long double)(r->cur.first + n) * per;
+        if (!r->anchored) {
+            r->base_ns = r->applied_ns = bound;
+            r->late_ns = 0;
+        } else if (r->cur.flags & LR20XX_LINK_GAP) {
+            r->base_ns = r->applied_ns = std::max(bound - r->late_ns, r->applied_ns);
+        } else {
+            r->late_ns += (std::max(bound - r->base_ns, 0.0L) - r->late_ns) / 16;
+            if (bound < r->base_ns)
+                r->base_ns = bound;
+            else
+                r->base_ns += std::min(bound - r->base_ns, (long double)n * per * 200e-6L);
+            r->applied_ns = r->base_ns >= r->applied_ns ? r->base_ns
+                                                        : r->applied_ns - std::min(r->applied_ns - r->base_ns, per * 0.9L);
+        }
+        r->anchored = true;
+        r->cur_ns = r->applied_ns + (long double)r->cur.first * per;
     }
     if (r->cur.flags & LR20XX_LINK_GAP) {
         /* samples were lost ahead of this chunk: said once, then the chunk is read */
@@ -240,7 +270,6 @@ int Device::readStream(SoapySDR::Stream *s, void *const *buffs, const size_t num
     const size_t avail = (r->cur.data.size() - r->off) / sb;
     const size_t n = std::min(numElems, avail);
     const uint8_t *p = r->cur.data.data() + r->off;
-    const uint64_t index = r->cur.first + r->off / sb;
     for (size_t i = 0; i < 2 * n; i++) {
         /* one component: int16 little-endian or int8 */
         const int v = cs8 ? (int8_t)p[i] : (int16_t)(p[2 * i] | p[2 * i + 1] << 8);
@@ -251,8 +280,8 @@ int Device::readStream(SoapySDR::Stream *s, void *const *buffs, const size_t num
         else
             ((int8_t *)buffs[0])[i] = (int8_t)(cs8 ? v : v >> 8);
     }
+    timeNs = (long long)(r->cur_ns + (long double)(r->off / sb) * 1e9L * r->rate_den / r->rate_num) + time_offset_;
     r->off += n * sb;
-    timeNs = (long long)((long double)index * 1e9L * r->rate_den / r->rate_num);
     flags |= SOAPY_SDR_HAS_TIME;
     if (r->off < r->cur.data.size())
         flags |= SOAPY_SDR_MORE_FRAGMENTS;
@@ -260,7 +289,7 @@ int Device::readStream(SoapySDR::Stream *s, void *const *buffs, const size_t num
 }
 
 int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const size_t numElems, int &flags,
-                        const long long, const long)
+                        const long long timeNs, const long)
 {
     TxStream *t = (TxStream *)s;
     if ((void *)s != (void *)tx_)
@@ -290,6 +319,14 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
         b.rate = (uint32_t)std::lround(tx_rate_);
         b.fdev_hz = (uint32_t)std::lround(tx_fdev_);
         b.power_dbm = (float)tx_power_;
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            /* the burst's start on the device's clock (1: a time already past, which comes back late) */
+            if (!b_->timed()) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "LR20xx: this device can't time a burst (update the bridge)");
+                return SOAPY_SDR_NOT_SUPPORTED;
+            }
+            b.at_us = std::max<long long>(1, std::llround((long double)(timeNs - time_offset_) / 1000));
+        }
         try {
             b_->tx_begin(b);
         } catch (const std::exception &e) {
@@ -435,9 +472,14 @@ void Device::tx_finish(TxStream &t)
         return;
     }
     int status = SOAPY_SDR_END_BURST;
+    long long key_ns = 0;
     try {
         lr20xx_link_tx_result_t r = b_->tx_commit();
-        if (r.tx_flags & LR20XX_FIFO_UNDERFLOW)
+        if (r.key_us)
+            key_ns = r.key_us * 1000 + time_offset_;
+        if (r.late)
+            status = SOAPY_SDR_TIME_ERROR;
+        else if (r.tx_flags & LR20XX_FIFO_UNDERFLOW)
             status = SOAPY_SDR_UNDERFLOW;
         else if (r.timed_out)
             status = SOAPY_SDR_TIMEOUT;
@@ -448,7 +490,7 @@ void Device::tx_finish(TxStream &t)
         status = SOAPY_SDR_STREAM_ERROR;
     }
     std::lock_guard<std::mutex> l(t.m);
-    t.status.push_back({status, 0});
+    t.status.push_back({status, key_ns});
     t.cv.notify_all();
 }
 
@@ -464,13 +506,35 @@ int Device::readStreamStatus(SoapySDR::Stream *s, size_t &chanMask, int &flags, 
     auto st = t->status.front();
     t->status.pop_front();
     chanMask = 1;
-    timeNs = 0;
-    flags = 0;
+    timeNs = st.second;
+    flags = st.second ? SOAPY_SDR_HAS_TIME : 0;
     if (st.first == SOAPY_SDR_END_BURST) {
-        flags = SOAPY_SDR_END_BURST;
+        flags |= SOAPY_SDR_END_BURST; /* the time: when it keyed up (the signal follows by the chip's start-up) */
         return 0;
     }
     return st.first;
+}
+
+/* ── Time: the device's clock (the bridge's since its boot), offset by setHardwareTime ── */
+
+bool Device::hasHardwareTime(const std::string &what) const { return what.empty() && b_->timed(); }
+
+long long Device::getHardwareTime(const std::string &what) const
+{
+    if (!hasHardwareTime(what))
+        return SoapySDR::Device::getHardwareTime(what);
+    /* read over the link: taken as of halfway through the round trip */
+    const auto t0 = std::chrono::steady_clock::now();
+    const int64_t us = b_->now_us();
+    const auto rtt = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0);
+    return us * 1000 + rtt.count() / 2 + time_offset_;
+}
+
+void Device::setHardwareTime(const long long timeNs, const std::string &what)
+{
+    if (!hasHardwareTime(what))
+        return SoapySDR::Device::setHardwareTime(timeNs, what);
+    time_offset_ += timeNs - getHardwareTime(what);
 }
 
 /* ── Gain ── */

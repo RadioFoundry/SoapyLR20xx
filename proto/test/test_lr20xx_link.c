@@ -70,16 +70,21 @@ static void structs(void)
     CHECK(lr20xx_link_put_plan(p, &pl) == LR20XX_LINK_PLAN_SIZE && lr20xx_link_get_plan(p, LR20XX_LINK_PLAN_SIZE, &pl2) &&
               pl2.rate_num == 2000000 && pl2.rate_den == 8 && pl2.passband_hz == 92500,
           "plan");
-    lr20xx_link_tx_begin_t t = {4, 0, 0, 48000, 2048, -9.5f, 123456789012ull}, t2;
+    lr20xx_link_tx_begin_t t = {4, 0, 0, 48000, 2048, -9.5f, 123456789012ull, -5}, t2;
     CHECK(lr20xx_link_put_tx_begin(p, &t) == LR20XX_LINK_TX_BEGIN_SIZE &&
               lr20xx_link_get_tx_begin(p, LR20XX_LINK_TX_BEGIN_SIZE, &t2) && t2.mode == 4 && t2.rate == 48000 &&
-              t2.power_dbm == -9.5f && t2.samples == 123456789012ull,
+              t2.power_dbm == -9.5f && t2.samples == 123456789012ull && t2.at_us == -5,
           "tx begin");
-    lr20xx_link_tx_result_t r = {3, 99999, 0x20, 1, 0}, r2;
+    CHECK(lr20xx_link_get_tx_begin(p, 37, &t2) && t2.samples == 123456789012ull && t2.at_us == 0 &&
+              !lr20xx_link_get_tx_begin(p, 36, &t2),
+          "tx begin without at_us: at once");
+    lr20xx_link_tx_result_t r = {3, 99999, 0x20, 1, 0, 1ll << 40, 1}, r2;
     CHECK(lr20xx_link_put_tx_result(p, &r) == LR20XX_LINK_TX_RESULT_SIZE &&
               lr20xx_link_get_tx_result(p, LR20XX_LINK_TX_RESULT_SIZE, &r2) && r2.runs == 3 && r2.sent == 99999 &&
-              r2.tx_flags == 0x20 && r2.early == 1,
+              r2.tx_flags == 0x20 && r2.early == 1 && r2.key_us == 1ll << 40 && r2.late == 1,
           "tx result");
+    CHECK(lr20xx_link_get_tx_result(p, 11, &r2) && r2.runs == 3 && r2.key_us == 0 && r2.late == 0,
+          "tx result from an older device");
     lr20xx_link_stats_t st = {1ull << 40, 1, 2, 3, 4, 5, 6, 7}, st2;
     CHECK(lr20xx_link_put_stats(p, &st) == LR20XX_LINK_STATS_SIZE &&
               lr20xx_link_get_stats(p, LR20XX_LINK_STATS_SIZE, &st2) && st2.samples == 1ull << 40 && st2.losses == 1 &&

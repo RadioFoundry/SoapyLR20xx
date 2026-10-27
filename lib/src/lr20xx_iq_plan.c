@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
-/* The receive modes' rates (lr20xx_iq.h): no I/O, so a host that drives the chip through a bridge plans as the
- * bridge does. */
+/* The receive modes' rates (lr20xx_iq.h): no I/O, so a host that drives the chip from afar plans as the chip's
+ * side does. */
 #include <math.h>
 #include <string.h>
 

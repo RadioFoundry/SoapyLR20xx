@@ -5,7 +5,7 @@
  * which DIO is wired to the host as an IRQ, the range its front end passes. The host's own pins (SPI, BUSY,
  * NRESET, a front-end supply) are the HAL's.
  *
- * Boards are named (lr20xx_board_find) or given as text (lr20xx_board_parse), so a SoapySDR argument can carry one.
+ * Boards are named (lr20xx_board_find) or given as text (lr20xx_board_parse), so a setting or argument can carry one.
  */
 #ifndef LR20XX_BOARD_H
 #define LR20XX_BOARD_H

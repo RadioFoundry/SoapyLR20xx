@@ -5,9 +5,7 @@
  * FIFOs. Written from the datasheet (DS.LR20xx Rev. 2.2: 3.7.2 SPI, 4.2 reset, 5.2 BUSY, 5.4 command frames); the
  * encodings are in lr20xx_cmd.h. The pins come through an lr20xx_hal_t (lr20xx_hal.h), so the same driver runs on
  * Linux's spidev and on an ESP32.
- *
- * From RadioFoundry Gateway's components/lr2021/include/lr2021.h (tools/upstream/files.txt): the same calls, with
- * the ESP-IDF bus setup moved into lib/hal/esp_idf.c and the patch RAM calls left out.
+
  */
 #ifndef LR20XX_H
 #define LR20XX_H

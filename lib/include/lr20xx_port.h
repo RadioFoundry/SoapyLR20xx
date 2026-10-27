@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 /*
  * What the library needs of the platform besides the chip's pins: error codes, a clock and waits. One port is
- * linked in: lib/port/posix.c (Linux, macOS), lib/port/esp_idf.c (ESP-IDF), or the tests' fake clock.
+ * linked in: port/posix.c (Linux, macOS), port/esp_idf.c (ESP-IDF), or the tests' fake clock.
  *
  * The error codes keep ESP-IDF's values, so on ESP-IDF an lr20xx_err_t is an esp_err_t.
  */

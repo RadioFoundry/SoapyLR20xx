@@ -2,8 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 /*
  * The HAL on ESP-IDF (lr20xx_hal_esp_idf.h): ESP-IDF's SPI master with DMA, NSS driven by the peripheral; BUSY and
- * NRESET plain GPIOs; the IRQ a GPIO with a rising-edge interrupt. From RadioFoundry Gateway's
- * components/lr2021/src/lr2021.c (its bus setup, transfer and IRQ code; tools/upstream/files.txt).
+ * NRESET plain GPIOs; the IRQ a GPIO with a rising-edge interrupt.
  */
 #include "lr20xx_hal_esp_idf.h"
 

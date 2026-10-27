@@ -2,8 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 /*
  * The LR20xx over a HAL (lr20xx.h, lr20xx_hal.h). Every frame waits for BUSY low first (5.2: a command sent while
- * BUSY is high may not run). From RadioFoundry Gateway's components/lr2021/src/lr2021.c, with the ESP-IDF calls
- * behind the HAL (tools/upstream/files.txt).
+ * BUSY is high may not run).
  */
 #include "lr20xx.h"
 

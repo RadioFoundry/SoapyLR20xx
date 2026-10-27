@@ -5,8 +5,8 @@
  * lr20xx_t. Portable and single-threaded: the caller runs lr20xx_iq_poll in a loop on a thread of its own, at a
  * priority that keeps the 1 KB FIFO read (2 ms at 125 kS/s int16, R2.18), and serializes every other call with it.
  *
- * From RadioFoundry Gateway's esp_idf/main/fe_lr2021.c (its session, reader and transmit run), without the
- * gateway's ring, resampler and scheduling: samples go to a sink as they come, at the chip's own rate.
+ * Samples go to a sink as they come, at the chip's own rate: buffering, resampling and scheduling are the
+ * caller's.
  *
  * Receive modes (lr20xx_iq_plan picks one for a rate):
  *
@@ -75,6 +75,9 @@ typedef struct {
     double center_hz;
     double ppm;             /* the crystal's error, corrected in the frequency sent */
     int gain;               /* SetAgcGainManual's step, 1 (-8 dB) to 13 (53.5 dB; R2.25); 0 the chip's AGC */
+    int slack_us;           /* reading by the level: read once the FIFO has this long left before it fills (at most
+                             * 640 bytes in, at least 256), so the reader may be held that long; 0: at 640 bytes,
+                             * the fewest reads (R2.34) */
 } lr20xx_iq_cfg_t;
 
 /* The front end's gain at each manual step 1 to 13, dB (R2.25: the ROM's table at 0xF30174). */

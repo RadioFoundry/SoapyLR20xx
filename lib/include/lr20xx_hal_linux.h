@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 /*
- * The HAL on Linux (lib/hal/linux.c): the chip on a spidev device (NSS its chip select), BUSY, NRESET and the IRQ
+ * The HAL on Linux (hal/linux.c): the chip on a spidev device (NSS its chip select), BUSY, NRESET and the IRQ
  * on GPIO lines of a GPIO character device (the kernel's v2 line API, no libgpiod). Built on Linux only
  * (LR20XX_HAL_LINUX).
  *

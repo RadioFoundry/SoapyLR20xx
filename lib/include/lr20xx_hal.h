@@ -2,8 +2,8 @@
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 /*
  * The chip's pins, as the driver (lr20xx.h) uses them: an SPI bus with the chip's NSS, BUSY, NRESET and optionally
- * a DIO wired as an IRQ. A backend fills an lr20xx_hal_t: lib/hal/linux.c (spidev and the GPIO character
- * device), lib/hal/esp_idf.c (ESP-IDF's SPI master), or the tests' mock.
+ * a DIO wired as an IRQ. A backend fills an lr20xx_hal_t: hal/linux.c (spidev and the GPIO character
+ * device), hal/esp_idf.c (ESP-IDF's SPI master), or the tests' mock.
  */
 #ifndef LR20XX_HAL_H
 #define LR20XX_HAL_H

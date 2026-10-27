@@ -413,12 +413,12 @@ static void session_frames(void)
     lr20xx_close(d);
 }
 
-static void stream(lr20xx_iq_mode_t mode, double rate, bool irq, const char *what)
+static void stream(lr20xx_iq_mode_t mode, double rate, bool irq, int slack_us, const char *what)
 {
     lr20xx_iq_t iq;
     lr20xx_t *d = chip(irq);
     lr20xx_iq_init(&iq, d, irq ? &lr20xx_board_w12 : NULL, false);
-    lr20xx_iq_cfg_t cfg = {.rate = rate, .mode = mode, .center_hz = 915e6, .gain = 13};
+    lr20xx_iq_cfg_t cfg = {.rate = rate, .mode = mode, .center_hz = 915e6, .gain = 13, .slack_us = slack_us};
     CHECK(lr20xx_iq_start(&iq, &cfg) == LR20XX_OK, "%s: start (%s)", what, iq.error);
     S.sb = iq.plan.sample_bytes;
     M.bytes_per_us = iq.plan.rate * iq.plan.sample_bytes / 1e6;
@@ -436,11 +436,14 @@ static void stream(lr20xx_iq_mode_t mode, double rate, bool irq, const char *wha
     if (irq && mode == LR20XX_IQ_LORA)
         CHECK(F.irq_waits > 10, "%s: waited on the IRQ (%d)", what, F.irq_waits);
     if (mode != LR20XX_IQ_LORA) {
-        /* by the level: reads of about 640 bytes, the level asked before one read in four or fewer */
+        /* by the level: reads of about 640 bytes (with a slack, what leaves the FIFO that long before it fills), the
+         * level asked before one read in four or fewer */
         const double per_read = (double)iq.stats.samples * iq.plan.sample_bytes / iq.stats.reads;
+        const double target = slack_us ? 1024 - 64 - M.bytes_per_us * slack_us : 640;
         const int asked = M.level_queries;
-        CHECK(per_read > 560 && asked * 3 < (int)iq.stats.reads, "%s: %.0f bytes a read, %d level queries for %u reads",
-              what, per_read, asked, iq.stats.reads);
+        CHECK(per_read > target - 80 && per_read < target + 80 && asked * 3 < (int)iq.stats.reads,
+              "%s: %.0f bytes a read (about %.0f), %d level queries for %u reads", what, per_read, target, asked,
+              iq.stats.reads);
     }
 
     /* a stall: the FIFO overflows */
@@ -714,12 +717,13 @@ int main(void)
     plans();
     init_checks();
     session_frames();
-    stream(LR20XX_IQ_FSK16, 250000, false, "FSK16 250 k, polled");
-    stream(LR20XX_IQ_CONV8, 576000, false, "CONV8 576 k, polled");
-    stream(LR20XX_IQ_LORA, 125000, false, "LORA 125 k, polled");
-    stream(LR20XX_IQ_LORA, 125000, true, "LORA 125 k, IRQ");
-    stream(LR20XX_IQ_FSK16, 250000, true, "FSK16 250 k, IRQ");
-    stream(LR20XX_IQ_CONV8, 384000, true, "CONV8 384 k, IRQ");
+    stream(LR20XX_IQ_FSK16, 250000, false, 0, "FSK16 250 k, polled");
+    stream(LR20XX_IQ_CONV8, 576000, false, 0, "CONV8 576 k, polled");
+    stream(LR20XX_IQ_LORA, 125000, false, 0, "LORA 125 k, polled");
+    stream(LR20XX_IQ_LORA, 125000, true, 0, "LORA 125 k, IRQ");
+    stream(LR20XX_IQ_FSK16, 250000, true, 0, "FSK16 250 k, IRQ");
+    stream(LR20XX_IQ_CONV8, 384000, true, 0, "CONV8 384 k, IRQ");
+    stream(LR20XX_IQ_CONV8, 384000, true, 700, "CONV8 384 k, IRQ, 700 us slack");
     transmit();
     transmit_pin();
     transmit_streamed();

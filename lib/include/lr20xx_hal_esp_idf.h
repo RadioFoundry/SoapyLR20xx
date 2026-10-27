@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 /*
- * The HAL on ESP-IDF (lib/hal/esp_idf.c): ESP-IDF's SPI master with DMA (NSS driven by the peripheral), BUSY and
- * NRESET plain GPIOs, the IRQ a GPIO with a rising-edge interrupt. From RadioFoundry Gateway's
- * components/lr2021/src/lr2021.c.
+ * The HAL on ESP-IDF (hal/esp_idf.c): ESP-IDF's SPI master with DMA (NSS driven by the peripheral), BUSY and
+ * NRESET plain GPIOs, the IRQ a GPIO with a rising-edge interrupt.
  *
  * The handle (lr20xx_config_t.mem) must be internal, DMA-capable RAM: MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA.
  */

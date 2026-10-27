@@ -1,32 +1,53 @@
-# Files imported from RadioFoundry Gateway (github.com/RadioFoundry/RadioFoundryGateway), one a line:
+# Files shared with RadioFoundry Gateway (github.com/RadioFoundry/RadioFoundryGateway), one a line:
 #   <upstream path>  <path here>  <how>
-# how: "sed"  - copied through transform.sed; import.sh reproduces it, so drift.sh diffs it line for line.
-#      "hand" - rewritten here from the upstream file; drift.sh shows upstream's changes to it, to port by hand.
-components/lr2021/include/lr2021_cmd.h      lib/include/lr20xx_cmd.h      sed
-components/lr2021/include/lr2021_tx.h       lib/include/lr20xx_tx.h       sed
-components/lr2021/include/lr2021_radio.h    lib/include/lr20xx_radio.h    sed
-components/lr2021/include/lr2021_lora.h     lib/include/lr20xx_lora.h     sed
-components/lr2021/include/lr2021_fsk.h      lib/include/lr20xx_fsk.h      sed
-components/lr2021/include/lr2021_proto.h    lib/include/lr20xx_proto.h    sed
-components/lr2021/include/lr2021.h          lib/include/lr20xx.h          hand
-components/lr2021/src/lr2021_cmd.c          lib/src/lr20xx_cmd.c          sed
-components/lr2021/src/lr2021_tx.c           lib/src/lr20xx_tx.c           sed
-components/lr2021/src/lr2021_radio.c        lib/src/lr20xx_radio.c        sed
-components/lr2021/src/lr2021_lora.c         lib/src/lr20xx_lora.c         sed
-components/lr2021/src/lr2021_fsk.c          lib/src/lr20xx_fsk.c          sed
-components/lr2021/src/lr2021_proto.c        lib/src/lr20xx_proto.c        sed
-components/lr2021/src/lr2021_tx_stream.c    lib/src/lr20xx_tx_stream.c    sed
-components/lr2021/src/lr2021_packet.c       lib/src/lr20xx_packet.c       sed
-components/lr2021/src/lr2021.c              lib/src/lr20xx.c              hand
-components/lr2021/test/test_lr2021.c        lib/test/test_lr20xx.c        sed
-components/lr2021/test/test_lr2021_tx.c     lib/test/test_lr20xx_tx.c     sed
-components/lr2021/test/test_lr2021_radio.c  lib/test/test_lr20xx_radio.c  sed
-components/lr2021/test/test_lr2021_lora.c   lib/test/test_lr20xx_lora.c   sed
-components/lr2021/test/test_lr2021_fsk.c    lib/test/test_lr20xx_fsk.c    sed
-components/lr2021/test/test_lr2021_proto.c  lib/test/test_lr20xx_proto.c  sed
-components/lr2021/test/test_lr2021_tx_stream.c lib/test/test_lr20xx_tx_stream.c sed
-components/lr2021/test/test_lr2021_packet.c lib/test/test_lr20xx_packet.c sed
-components/lr2021/test/test_lr2021_driver.c lib/test/test_lr20xx_driver.c hand
-components/lr2021/test/esp_shim/esp_shim.c  lib/test/mock_hal.c           hand
-esp_idf/main/fe_lr2021.c                    lib/src/lr20xx_iq.c           hand
-docs/spec/lr2021-iq.md                      docs/iq.md                    hand
+# how: "sed"  - the same file but for the rename: transform.sed makes ours from upstream's, export.sed upstream's
+#               from ours, so drift.sh diffs it line for line.
+#      "hand" - each side's own: drift.sh shows upstream's changes to it, to port by hand.
+components/lr2021/include/lr2021.h              lib/include/lr20xx.h              sed
+components/lr2021/include/lr2021_cmd.h          lib/include/lr20xx_cmd.h          sed
+components/lr2021/include/lr2021_tx.h           lib/include/lr20xx_tx.h           sed
+components/lr2021/include/lr2021_radio.h        lib/include/lr20xx_radio.h        sed
+components/lr2021/include/lr2021_lora.h         lib/include/lr20xx_lora.h         sed
+components/lr2021/include/lr2021_fsk.h          lib/include/lr20xx_fsk.h          sed
+components/lr2021/include/lr2021_proto.h        lib/include/lr20xx_proto.h        sed
+components/lr2021/include/lr2021_hal.h          lib/include/lr20xx_hal.h          sed
+components/lr2021/include/lr2021_hal_esp_idf.h  lib/include/lr20xx_hal_esp_idf.h  sed
+components/lr2021/include/lr2021_hal_linux.h    lib/include/lr20xx_hal_linux.h    sed
+components/lr2021/include/lr2021_port.h         lib/include/lr20xx_port.h         sed
+components/lr2021/include/lr2021_board.h        lib/include/lr20xx_board.h        sed
+components/lr2021/include/lr2021_chips.h        lib/include/lr20xx_chips.h        sed
+components/lr2021/include/lr2021_iq.h           lib/include/lr20xx_iq.h           sed
+components/lr2021/src/lr2021.c                  lib/src/lr20xx.c                  sed
+components/lr2021/src/lr2021_cmd.c              lib/src/lr20xx_cmd.c              sed
+components/lr2021/src/lr2021_tx.c               lib/src/lr20xx_tx.c               sed
+components/lr2021/src/lr2021_radio.c            lib/src/lr20xx_radio.c            sed
+components/lr2021/src/lr2021_lora.c             lib/src/lr20xx_lora.c             sed
+components/lr2021/src/lr2021_fsk.c              lib/src/lr20xx_fsk.c              sed
+components/lr2021/src/lr2021_proto.c            lib/src/lr20xx_proto.c            sed
+components/lr2021/src/lr2021_tx_stream.c        lib/src/lr20xx_tx_stream.c        sed
+components/lr2021/src/lr2021_packet.c           lib/src/lr20xx_packet.c           sed
+components/lr2021/src/lr2021_iq.c               lib/src/lr20xx_iq.c               sed
+components/lr2021/src/lr2021_iq_plan.c          lib/src/lr20xx_iq_plan.c          sed
+components/lr2021/src/lr2021_board.c            lib/src/lr20xx_board.c            sed
+components/lr2021/src/lr2021_chips.c            lib/src/lr20xx_chips.c            sed
+components/lr2021/hal/esp_idf.c                 lib/hal/esp_idf.c                 sed
+components/lr2021/hal/linux.c                   lib/hal/linux.c                   sed
+components/lr2021/port/esp_idf.c                lib/port/esp_idf.c                sed
+components/lr2021/port/posix.c                  lib/port/posix.c                  sed
+components/lr2021/linker.lf                     lib/linker.lf                     sed
+components/lr2021/test/mock_hal.c               lib/test/mock_hal.c               sed
+components/lr2021/test/mock_hal.h               lib/test/mock_hal.h               sed
+components/lr2021/test/test_lr2021.c            lib/test/test_lr20xx.c            sed
+components/lr2021/test/test_lr2021_tx.c         lib/test/test_lr20xx_tx.c         sed
+components/lr2021/test/test_lr2021_radio.c      lib/test/test_lr20xx_radio.c      sed
+components/lr2021/test/test_lr2021_lora.c       lib/test/test_lr20xx_lora.c       sed
+components/lr2021/test/test_lr2021_fsk.c        lib/test/test_lr20xx_fsk.c        sed
+components/lr2021/test/test_lr2021_proto.c      lib/test/test_lr20xx_proto.c      sed
+components/lr2021/test/test_lr2021_tx_stream.c  lib/test/test_lr20xx_tx_stream.c  sed
+components/lr2021/test/test_lr2021_packet.c     lib/test/test_lr20xx_packet.c     sed
+components/lr2021/test/test_lr2021_driver.c     lib/test/test_lr20xx_driver.c     sed
+components/lr2021/test/test_lr2021_iq.c         lib/test/test_lr20xx_iq.c         sed
+components/lr2021/test/test_lr2021_chips.c      lib/test/test_lr20xx_chips.c      sed
+components/lr2021/test/test_lr2021_hal_linux.c  lib/test/test_lr20xx_hal_linux.c  sed
+components/lr2021/CMakeLists.txt                lib/CMakeLists.txt                hand
+docs/spec/lr2021-iq.md                          docs/iq.md                        hand

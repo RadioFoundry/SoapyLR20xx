@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 /*
- * Raw I/Q sessions and transmissions (lr20xx_iq.h). From RadioFoundry Gateway's esp_idf/main/fe_lr2021.c: its
- * session start and end, its reader and its transmit run, without the gateway's ring, resampler, tasks and log.
- * Every step cites docs/iq.md.
+ * Raw I/Q sessions and transmissions (lr20xx_iq.h). Every step cites docs/iq.md.
  */
 #include "lr20xx_iq.h"
 
@@ -15,8 +13,8 @@
 #include "lr20xx_radio.h"
 
 /* The FIFO level that raises the RX FIFO IRQ on the DIO. LORA (125 kS/s int16, 500 kB/s): 1.5 ms in, the rest fills
- * in 0.5. CONV8 fills the FIFO in 0.77 ms at 576 k: half of it. FSK16 at 250 k fills it in 1 ms: at 512 bytes the
- * gateway's reader had too little time to start and lost samples about 25 times a second, so a quarter. */
+ * in 0.5. CONV8 fills the FIFO in 0.77 ms at 576 k: half of it. FSK16 at 250 k fills it in 1 ms: at 512 bytes a
+ * reader had too little time to start and lost samples about 25 times a second, so a quarter. */
 #define IRQ_LEVEL_LORA 768
 #define IRQ_LEVEL_CONV8 512
 #define IRQ_LEVEL_FSK16 256
@@ -24,8 +22,9 @@
  * (a level query, BUSY, the DMA's set-up): reading whatever had come in, 300-400 bytes at a time, kept the SPI busy
  * 93% of the time at 576 k (R2.29, R2.34) and the reader on the CPU half of it. Between real level queries (every
  * RECKON_READS reads) the level is reckoned from the rate, less a margin: a read past the level would underflow
- * (R2.14). Waiting only for an empty FIFO never waited, and the gateway's reader starved its core. */
+ * (R2.14). Waiting only for an empty FIFO never waited, and a reader starved its core. */
 #define READ_TARGET 640
+#define READ_MIN 256 /* cfg.slack_us's floor */
 #define RECKON_READS 4
 #define RECKON_MARGIN 64
 #define LOSS (LR20XX_FIFO_OVERFLOW | LR20XX_FIFO_UNDERFLOW) /* R2.14 */
@@ -97,7 +96,7 @@ lr20xx_err_t lr20xx_iq_init(lr20xx_iq_t *iq, lr20xx_t *dev, const lr20xx_board_t
 }
 
 /* The RF switch for the frequency (the PA band or the bypass), and the RX path: HF above 1.2 GHz (untried for raw
- * I/Q; the gateway's work is all on the LF path). */
+ * I/Q; the findings are all on the LF path). */
 static void rf_setup(lr20xx_iq_t *iq, double hz)
 {
     uint8_t dio[LR20XX_BOARD_RFSW_MAX], modes[LR20XX_BOARD_RFSW_MAX], f[12];
@@ -426,9 +425,14 @@ int lr20xx_iq_poll(lr20xx_iq_t *iq, lr20xx_iq_sink_t sink, void *ctx, int wait_m
             return 0;
         }
     }
-    if (backlog < READ_TARGET) {
-        /* the time the FIFO takes to reach READ_TARGET, at most wait_ms */
-        double us = (READ_TARGET - backlog) / bpus;
+    size_t target = READ_TARGET;
+    if (iq->cfg.slack_us > 0) {
+        const double t = LR20XX_IQ_FIFO_BYTES - RECKON_MARGIN - bpus * iq->cfg.slack_us;
+        target = t < READ_MIN ? READ_MIN : t < READ_TARGET ? (size_t)t & ~3u : READ_TARGET;
+    }
+    if (backlog < target) {
+        /* the time the FIFO takes to reach the target, at most wait_ms */
+        double us = (target - backlog) / bpus;
         if (us > wait_ms * 1000.0)
             us = wait_ms * 1000.0;
         if (us > 0)

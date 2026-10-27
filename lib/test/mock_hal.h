@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Spencer Fowler
 #pragma once
-/* The fake chip and board behind a mock HAL (lr20xx_hal.h) and a fake clock (lr20xx_port.h), for the host tests. From
- * RadioFoundry Gateway's components/lr2021/test/esp_shim (the ESP-IDF calls it stood in for are now the HAL's). */
+/* The fake chip and board behind a mock HAL (lr20xx_hal.h) and a fake clock (lr20xx_port.h), for the host tests. */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

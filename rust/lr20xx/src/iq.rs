@@ -310,6 +310,8 @@ impl<'d> IqSession<'d> {
             power_dbm: tx.power_dbm,
             samples: tx.samples,
             max_ms: tx.max_ms,
+            streamed: false,
+            stop: std::ptr::null(),
         };
         let mut s: sys::lr20xx_tx_stream_stats_t = unsafe { std::mem::zeroed() };
         let e = unsafe {

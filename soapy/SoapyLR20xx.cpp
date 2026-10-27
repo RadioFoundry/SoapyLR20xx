@@ -57,7 +57,16 @@ struct Device::RxStream {
 
 struct Device::TxStream {
     std::string format;
-    std::vector<std::complex<float>> buf;
+    /* the burst under way: begun on the device, its samples converted and sent as they come */
+    bool open = false;
+    int mode = 0;
+    double rate = 0;
+    uint64_t n = 0;                          /* samples written */
+    std::vector<std::complex<float>> buf;    /* written, not yet converted (iq_polar: a dip held for what follows) */
+    std::complex<float> ctx;                 /* the last sample converted (iq_phase: the last nonzero one) */
+    bool has_ctx = false;
+    float last_hz = 0;                       /* freq, phase_step: the last sample's */
+    uint64_t over = 0, counted = 0;          /* past the mode's frequency limit, of those counted */
     std::deque<std::pair<int, long long>> status; /* (flags or an error code, 0) */
     std::mutex m;
     std::condition_variable cv;
@@ -157,6 +166,11 @@ void Device::closeStream(SoapySDR::Stream *s)
         delete rx_;
         rx_ = nullptr;
     } else if ((void *)s == (void *)tx_) {
+        if (tx_->open)
+            try {
+                b_->tx_abort(); /* a burst never ended */
+            } catch (...) {
+            }
         delete tx_;
         tx_ = nullptr;
     }
@@ -251,11 +265,45 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
     TxStream *t = (TxStream *)s;
     if ((void *)s != (void *)tx_)
         return SOAPY_SDR_STREAM_ERROR;
-    if (t->buf.size() + numElems > hello_.tx_max_samples) {
+    const bool streams = hello_.caps & LR20XX_LINK_CAP_TX_STREAM;
+    if (!streams && t->n + t->buf.size() + numElems > hello_.tx_max_samples) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "LR20xx: a burst of more than %u samples doesn't fit the device",
                        hello_.tx_max_samples);
+        if (t->open)
+            try {
+                b_->tx_abort();
+            } catch (...) {
+            }
+        t->open = false;
         t->buf.clear();
         return SOAPY_SDR_STREAM_ERROR;
+    }
+    if (!t->open) {
+        /* a new burst: the settings now */
+        lr20xx_link_tx_begin_t b{};
+        b.mode = (uint8_t)tx_mode_;
+        {
+            std::lock_guard<std::mutex> l(m_);
+            b.center_hz = tx_center_;
+            b.ppm = ppm_;
+        }
+        b.rate = (uint32_t)std::lround(tx_rate_);
+        b.fdev_hz = (uint32_t)std::lround(tx_fdev_);
+        b.power_dbm = (float)tx_power_;
+        try {
+            b_->tx_begin(b);
+        } catch (const std::exception &e) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
+            return SOAPY_SDR_STREAM_ERROR;
+        }
+        t->open = true;
+        t->mode = tx_mode_;
+        t->rate = tx_rate_;
+        t->n = 0;
+        t->buf.clear();
+        t->has_ctx = false;
+        t->last_hz = 0;
+        t->over = t->counted = 0;
     }
     for (size_t i = 0; i < numElems; i++) {
         std::complex<float> v;
@@ -267,8 +315,25 @@ int Device::writeStream(SoapySDR::Stream *s, const void *const *buffs, const siz
             v = {((const int8_t *)buffs[0])[2 * i] / 128.0f, ((const int8_t *)buffs[0])[2 * i + 1] / 128.0f};
         t->buf.push_back(v);
     }
-    if (flags & SOAPY_SDR_END_BURST)
-        send_tx(*t);
+    const bool end = flags & SOAPY_SDR_END_BURST;
+    try {
+        /* a bridge that streams gets the samples as they come; otherwise they're gathered for the end */
+        if (streams || end)
+            tx_flush(*t, end);
+    } catch (const std::exception &e) {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "%s", e.what());
+        try {
+            b_->tx_abort();
+        } catch (...) {
+        }
+        t->open = false;
+        std::lock_guard<std::mutex> l(t->m);
+        t->status.push_back({SOAPY_SDR_STREAM_ERROR, 0});
+        t->cv.notify_all();
+        return SOAPY_SDR_STREAM_ERROR;
+    }
+    if (end)
+        tx_finish(*t);
     return (int)numElems;
 }
 
@@ -283,77 +348,95 @@ double Device::tx_freq_limit() const
     return 127.0 * tx_rate_ / 128.0;
 }
 
-/* The burst buffered so far, converted to the transmit mode's samples and sent; its outcome queued for
- * readStreamStatus. */
-void Device::send_tx(TxStream &t)
+/* The samples written so far, converted to the transmit mode's and sent, with the last one converted before as
+ * context (a phase to step from); iq_polar keeps a trailing dip back for the sample after it (its phase is drawn
+ * across the dip), unless end. */
+void Device::tx_flush(TxStream &t, bool end)
 {
-    std::vector<std::complex<float>> x;
-    x.swap(t.buf);
-    const size_t n = x.size();
+    const bool iq = t.mode == LR20XX_TX_IQ_POLAR || t.mode == LR20XX_TX_IQ_PHASE;
+    const double rmin = iq ? std::max(polar_rmin_, 0.2) : 0;
+    size_t n = t.buf.size();
+    if (!end && t.mode == LR20XX_TX_IQ_POLAR && n < 4096) {
+        while (n && std::abs(t.buf[n - 1]) < (float)polar_rmin_)
+            n--;
+    }
     if (!n)
         return;
-    int bytes = 2;
-    for (auto &m : TX_MODES)
-        if (m.mode == tx_mode_)
-            bytes = m.bytes;
-    std::vector<uint8_t> data(n * (size_t)bytes);
-    const uint32_t rate = (uint32_t)std::lround(tx_rate_);
-    if (!warned_tx_limit_) {
-        /* past the mode's frequency limit the chip sends something else (I/Q: counted where the magnitude is up,
-         * since near zero any waveform's phase steps are large) */
-        const bool iq = tx_mode_ == LR20XX_TX_IQ_POLAR || tx_mode_ == LR20XX_TX_IQ_PHASE;
-        const double limit = tx_freq_limit(), rmin = iq ? std::max(polar_rmin_, 0.2) : 0;
-        size_t over = 0;
-        for (size_t i = 1; i < n; i++)
-            if (std::abs(x[i]) >= rmin && std::abs(x[i - 1]) >= rmin &&
-                std::abs(std::arg(x[i] * std::conj(x[i - 1]))) * tx_rate_ / (2 * M_PI) > limit * 1.02)
-                over++;
-        if (over * 1000 > n) {
-            warned_tx_limit_ = true;
-            SoapySDR::logf(SOAPY_SDR_WARNING,
-                           "LR20xx: %.1f%% of the burst is past %s's ±%.0f Hz, which it doesn't send right%s",
-                           100.0 * (double)over / (double)n, tx_mode_name(tx_mode_), limit,
-                           tx_mode_ == LR20XX_TX_FREQ ? " (raise tx_fdev)" : "");
-        }
+    /* past the mode's frequency limit the chip sends something else (I/Q: counted where the magnitude is up,
+     * since near zero any waveform's phase steps are large) */
+    const double limit = tx_freq_limit();
+    for (size_t i = 0; i < n; i++) {
+        const std::complex<float> *p = i ? &t.buf[i - 1] : t.has_ctx ? &t.ctx : nullptr;
+        if (!p || std::abs(t.buf[i]) < rmin || std::abs(*p) < rmin)
+            continue;
+        t.counted++;
+        if (std::abs(std::arg(t.buf[i] * std::conj(*p))) * t.rate / (2 * M_PI) > limit * 1.02)
+            t.over++;
     }
-    if (tx_mode_ == LR20XX_TX_IQ_POLAR || tx_mode_ == LR20XX_TX_IQ_PHASE) {
-        std::vector<float> iq(2 * n);
-        for (size_t i = 0; i < n; i++) {
-            iq[2 * i] = x[i].real();
-            iq[2 * i + 1] = x[i].imag();
+    const size_t c = t.has_ctx ? 1 : 0; /* the context in front, its output dropped */
+    std::vector<uint8_t> data;
+    if (iq) {
+        std::vector<float> f(2 * (n + c));
+        if (c) {
+            f[0] = t.ctx.real();
+            f[1] = t.ctx.imag();
         }
-        if (tx_mode_ == LR20XX_TX_IQ_POLAR)
-            lr20xx_polar_iq8(iq.data(), n, 1.0f, (float)polar_rmin_, nullptr, (int8_t *)data.data());
+        for (size_t i = 0; i < n; i++) {
+            f[2 * (i + c)] = t.buf[i].real();
+            f[2 * (i + c) + 1] = t.buf[i].imag();
+        }
+        std::vector<int8_t> out(2 * (n + c));
+        if (t.mode == LR20XX_TX_IQ_POLAR)
+            lr20xx_polar_iq8(f.data(), n + c, 1.0f, (float)polar_rmin_, nullptr, out.data());
         else
-            lr20xx_phase_iq8(iq.data(), n, (int8_t *)data.data());
+            lr20xx_phase_iq8(f.data(), n + c, out.data());
+        data.assign((const uint8_t *)out.data() + 2 * c, (const uint8_t *)out.data() + 2 * (n + c));
     } else {
         /* FREQ and PHASE_STEP: the input's instantaneous frequency, from its phase step a sample */
-        float last = 0;
+        const uint32_t rate = (uint32_t)std::lround(t.rate);
+        data.resize(n);
         for (size_t i = 0; i < n; i++) {
-            float hz = last;
-            if (i)
-                hz = std::arg(x[i] * std::conj(x[i - 1])) * (float)tx_rate_ / (float)(2 * M_PI);
+            float hz = t.last_hz;
+            const std::complex<float> *p = i ? &t.buf[i - 1] : t.has_ctx ? &t.ctx : nullptr;
+            if (p)
+                hz = std::arg(t.buf[i] * std::conj(*p)) * (float)t.rate / (float)(2 * M_PI);
             else if (n > 1)
-                hz = std::arg(x[1] * std::conj(x[0])) * (float)tx_rate_ / (float)(2 * M_PI);
-            last = hz;
-            data[i] = (uint8_t)(tx_mode_ == LR20XX_TX_FREQ ? lr20xx_raw_freq_sample(hz, (float)tx_fdev_)
-                                                           : lr20xx_phase_step_sample(hz, rate));
+                hz = std::arg(t.buf[1] * std::conj(t.buf[0])) * (float)t.rate / (float)(2 * M_PI);
+            t.last_hz = hz;
+            data[i] = (uint8_t)(t.mode == LR20XX_TX_FREQ ? lr20xx_raw_freq_sample(hz, (float)tx_fdev_)
+                                                         : lr20xx_phase_step_sample(hz, rate));
         }
     }
-    lr20xx_link_tx_begin_t b{};
-    b.mode = (uint8_t)tx_mode_;
-    {
-        std::lock_guard<std::mutex> l(m_);
-        b.center_hz = tx_center_;
-        b.ppm = ppm_;
+    for (size_t i = 0; i < n; i++)
+        if (t.mode != LR20XX_TX_IQ_PHASE || t.buf[i] != std::complex<float>(0, 0)) {
+            t.ctx = t.buf[i];
+            t.has_ctx = true;
+        }
+    t.buf.erase(t.buf.begin(), t.buf.begin() + (std::ptrdiff_t)n);
+    t.n += n;
+    b_->tx_data(data.data(), data.size());
+}
+
+/* The burst's end: TX_COMMIT, its outcome queued for readStreamStatus. */
+void Device::tx_finish(TxStream &t)
+{
+    t.open = false;
+    if (!warned_tx_limit_ && t.over * 1000 > t.counted && t.counted) {
+        warned_tx_limit_ = true;
+        SoapySDR::logf(SOAPY_SDR_WARNING, "LR20xx: %.1f%% of the burst is past %s's ±%.0f Hz, which it doesn't send right%s",
+                       100.0 * (double)t.over / (double)t.counted, tx_mode_name(t.mode), tx_freq_limit(),
+                       t.mode == LR20XX_TX_FREQ ? " (raise tx_fdev)" : "");
     }
-    b.rate = rate;
-    b.fdev_hz = (uint32_t)std::lround(tx_fdev_);
-    b.power_dbm = (float)tx_power_;
-    b.samples = n;
+    if (!t.n) {
+        try {
+            b_->tx_abort();
+        } catch (...) {
+        }
+        return;
+    }
     int status = SOAPY_SDR_END_BURST;
     try {
-        lr20xx_link_tx_result_t r = b_->transmit(b, data);
+        lr20xx_link_tx_result_t r = b_->tx_commit();
         if (r.tx_flags & LR20XX_FIFO_UNDERFLOW)
             status = SOAPY_SDR_UNDERFLOW;
         else if (r.timed_out)

@@ -70,5 +70,11 @@ READ_REG, WRITE_REG, RAW and TEMP are refused (`LR20XX_ERR_INVALID_STATE`) while
 after it, the chip's state is the host's problem.
 
 A transmission is TX_BEGIN, then exactly `samples` samples in TX_DATA frames (in the mode's format: 2 bytes a sample
-for I/Q, 1 for frequency or phase steps), then TX_COMMIT. The bridge buffers the whole burst first: HELLO's
-`tx_max_samples` is the most it takes. Reception pauses for the burst and resumes after it, with a gap.
+for I/Q, 1 for frequency or phase steps), then TX_COMMIT. A bridge whose HELLO has capability 0x08 (TX_STREAM)
+also takes `samples` 0: a streamed burst, as long as the TX_DATA that follows, ended by TX_COMMIT. It keys up once
+it has enough (0.2 s of samples streamed; for a known length, when the rest will come in before what's in has gone
+out, at the link's rate so far) and takes TX_DATA into a ring as the burst goes out: while the ring is full it stops
+reading the link, and the link's flow control holds the host. A burst that runs dry holds the last sample (R3.13);
+after a second with nothing, the bridge ends it and TX_COMMIT answers `LR20XX_ERR_TIMEOUT`. Without TX_STREAM, the
+bridge buffers the whole burst first, and HELLO's `tx_max_samples` is the most it takes. Reception pauses for the
+burst and resumes after it, with a gap.

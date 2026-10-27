@@ -7,6 +7,7 @@
  */
 #include "lr20xx_iq.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -452,7 +453,9 @@ static size_t pad_pull(void *ctx, uint8_t *buf, size_t max)
 {
     pad_t *p = ctx;
     size_t n = p->ended ? 0 : p->pull(p->ctx, buf, max);
-    if (!n) {
+    if (n == LR20XX_TX_PULL_WAIT)
+        return n;
+    if (!n && p->run_bytes) {
         p->ended = true;
         size_t rest = p->sent % p->run_bytes ? p->run_bytes - p->sent % p->run_bytes : 0;
         n = rest < max ? rest : max;
@@ -535,14 +538,19 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
         const uint32_t timeout =
             tx->mode == LR20XX_TX_CW ? 0 : (uint32_t)((uint64_t)run * 32000 / tx->rate + 32 * 50);
         const int64_t total_ms = tx->samples && tx->rate ? (int64_t)(tx->samples * 1000 / tx->rate) : 0;
-        pad_t pad = {pull, ctx, (size_t)run * (size_t)sb, 0, false};
+        pad_t pad = {pull, ctx, tx->streamed ? 0 : (size_t)run * (size_t)sb, 0, false};
         lr20xx_tx_stream_cfg_t c = {
             .start = start,
             .start_len = lr20xx_tx_start_frame(&s, start, timeout),
-            .run_bytes = tx->mode == LR20XX_TX_CW ? 0 : (uint32_t)pad.run_bytes,
+            .run_bytes = tx->mode == LR20XX_TX_CW ? 0 : (uint32_t)run * (uint32_t)sb,
             .bytes_per_s = tx->rate * (uint32_t)sb,
-            .max_ms = tx->max_ms > 0 ? tx->max_ms : total_ms ? (int)(total_ms + 2000) : 10000,
+            .max_ms = tx->max_ms > 0     ? tx->max_ms
+                      : tx->streamed     ? INT_MAX
+                      : total_ms         ? (int)(total_ms + 2000)
+                                         : 10000,
             .irq_pin = pin,
+            .cut_end = tx->streamed && tx->mode != LR20XX_TX_CW,
+            .stop = tx->stop,
         };
         rf_hold_tx(iq, hz, true);
         e = lr20xx_tx_stream(iq->dev, &c, pad_pull, &pad, stats);

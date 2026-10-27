@@ -143,13 +143,16 @@ typedef struct {
     uint32_t fdev_hz;       /* FREQ: count x fdev / 64 Hz (R3.10) */
     double power_dbm;
     uint64_t samples;       /* the transmission's length in samples, to size the runs (0: unknown, full runs) */
-    int max_ms;             /* give up after this (0: the length plus 2 s, or 10 s) */
+    int max_ms;             /* give up after this (0: the length plus 2 s, or 10 s; streamed: none) */
+    bool streamed;          /* fed as it goes: the pull may answer LR20XX_TX_PULL_WAIT, and the end isn't padded but
+                             * cut where the data ends */
+    const volatile bool *stop; /* set: the transmission ends at once (NULL: none) */
 } lr20xx_iq_tx_t;
 
 /* One transmission, half duplex: a receive session is paused (no reset or new calibration where it already
  * calibrated the frequency, R3.16), the mode set up, the samples pulled and streamed in runs (R3.15), then the
  * session resumed. pull gives FIFO bytes in the mode's format (lr20xx_tx_sample_bytes); past its end the last run
- * is filled with zeros. */
+ * is filled with zeros, or (tx->streamed) cut. */
 lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20xx_tx_pull_t pull, void *ctx,
                                 lr20xx_tx_stream_stats_t *stats);
 

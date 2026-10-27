@@ -56,6 +56,13 @@ if(LR20XX_TESTS)
                     --module-dir $<TARGET_FILE_DIR:lr20xxSupport>
                     --bridge ${LR20XX_ROOT}/tools/fake_bridge/fake_bridge.py)
         set_tests_properties(soapy_fake_bridge PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+        # against a bridge that takes a transmission only whole (before LR20XX_LINK_CAP_TX_STREAM)
+        add_test(NAME soapy_fake_bridge_whole_tx
+            COMMAND ${LR20XX_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_fake_bridge.py
+                    --module-dir $<TARGET_FILE_DIR:lr20xxSupport>
+                    --bridge ${LR20XX_ROOT}/tools/fake_bridge/fake_bridge.py)
+        set_tests_properties(soapy_fake_bridge_whole_tx PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
+                             ENVIRONMENT "LR20XX_FAKE_ARGS=--no-tx-stream")
     else()
         add_test(NAME soapy_fake_bridge COMMAND ${CMAKE_COMMAND} -E echo "no python3 with SoapySDR: skipped")
         set_tests_properties(soapy_fake_bridge PROPERTIES SKIP_REGULAR_EXPRESSION "skipped")

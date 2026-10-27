@@ -127,6 +127,7 @@ public:
         lr20xx_link_hello_t h{};
         if (!lr20xx_link_get_hello(a.data(), a.size(), &h))
             throw Error(-1, "LR20xx: short HELLO answer from " + where_);
+        caps_ = h.caps;
         return h;
     }
 
@@ -186,6 +187,54 @@ public:
         if (!lr20xx_link_get_tx_result(a.data(), a.size(), &r))
             throw Error(-1, "LR20xx: short TX_COMMIT answer");
         return r;
+    }
+
+    /* Streamed: TX_BEGIN with 0 samples, TX_DATA as it comes (the bridge keys up once it has enough, and the link's
+     * flow control holds this side back while its buffer is full), TX_COMMIT at the end */
+    bool streams() const { return caps_ & LR20XX_LINK_CAP_TX_STREAM; }
+
+    void tx_begin(const lr20xx_link_tx_begin_t &b) override
+    {
+        if (!streams())
+            return Backend::tx_begin(b);
+        tx_b_ = b;
+        tx_b_.samples = 0;
+        tx_sent_ = 0;
+        uint8_t p[LR20XX_LINK_TX_BEGIN_SIZE];
+        lr20xx_link_put_tx_begin(p, &tx_b_);
+        request(LR20XX_CMD_TX_BEGIN, p, sizeof p);
+    }
+
+    void tx_data(const uint8_t *p, size_t n) override
+    {
+        if (!streams())
+            return Backend::tx_data(p, n);
+        std::vector<uint8_t> f(LR20XX_LINK_HEADER + LR20XX_LINK_MAX_PAYLOAD);
+        for (size_t off = 0; off < n; off += LR20XX_LINK_MAX_PAYLOAD) {
+            size_t k = std::min<size_t>(LR20XX_LINK_MAX_PAYLOAD, n - off);
+            send(f.data(), lr20xx_link_tx_data(f.data(), f.size(), p + off, k));
+        }
+        tx_sent_ += n;
+    }
+
+    lr20xx_link_tx_result_t tx_commit() override
+    {
+        if (!streams())
+            return Backend::tx_commit();
+        /* the answer comes once it has gone out: at most all of it still to send, plus a margin */
+        const double bps = (double)tx_b_.rate * (tx_b_.mode == LR20XX_TX_FREQ || tx_b_.mode == LR20XX_TX_PHASE_STEP ? 1 : 2);
+        auto a = request(LR20XX_CMD_TX_COMMIT, nullptr, 0, (bps > 0 ? (double)tx_sent_ / bps : 0) + 5);
+        lr20xx_link_tx_result_t r{};
+        if (!lr20xx_link_get_tx_result(a.data(), a.size(), &r))
+            throw Error(-1, "LR20xx: short TX_COMMIT answer");
+        return r;
+    }
+
+    void tx_abort() override
+    {
+        if (!streams())
+            return Backend::tx_abort();
+        request(LR20XX_CMD_TX_ABORT, nullptr, 0);
     }
 
     std::vector<uint32_t> read_reg(uint32_t addr, int n) override
@@ -399,6 +448,8 @@ private:
 
     int fd_;
     std::string where_;
+    uint8_t caps_ = 0;
+    uint64_t tx_sent_ = 0; /* a streamed transmission's bytes so far */
     lr20xx_link_parser_t parser_;
     std::thread reader_;
     std::atomic<bool> quit_{false};

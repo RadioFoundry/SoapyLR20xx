@@ -40,6 +40,8 @@ pub mod cmd {
 pub const CAP_RX: u8 = 0x01;
 pub const CAP_TX: u8 = 0x02;
 pub const CAP_IRQ: u8 = 0x04;
+/// TX_BEGIN with 0 samples streams until TX_COMMIT; a burst of any length.
+pub const CAP_TX_STREAM: u8 = 0x08;
 /// RX_DATA flag: samples were lost ahead of these.
 pub const FLAG_GAP: u8 = 0x01;
 pub const EVENT_RX_FAILED: u16 = 1;

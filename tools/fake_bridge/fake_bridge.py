@@ -59,7 +59,8 @@ def frame(t, payload):
 
 def hello(args):
     # lr20xx_link_put_hello: 106 bytes
-    return struct.pack("<HBBBBIddd24s24s24s", 1, 0x01, 0x18, 1, 0x03, TX_MAX, 150e6, 960e6, 22.0,
+    caps = 0x03 if args.no_tx_stream else 0x0B  # RX, TX (, TX_STREAM)
+    return struct.pack("<HBBBBIddd24s24s24s", 1, 0x01, 0x18, 1, caps, TX_MAX, 150e6, 960e6, 22.0,
                        b"fake", b"fake_bridge 0.1", args.serial.encode())
 
 
@@ -195,7 +196,7 @@ class Client:
             return self.rsp(seq)
         if cmd == TX_BEGIN:
             mode, center, ppm, rate, fdev, power, n = struct.unpack("<BddIIfQ", a[:37])
-            if mode not in TX_BYTES or n > TX_MAX:
+            if mode not in TX_BYTES or n > TX_MAX or (n == 0 and self.args.no_tx_stream):
                 return self.rsp(seq, ERR_INVALID_ARG)
             self.tx = dict(mode=mode, rate=rate, n=n, data=bytearray())
             return self.rsp(seq)
@@ -206,8 +207,10 @@ class Client:
             tx, self.tx = self.tx, None
             if not tx:
                 return self.rsp(seq, ERR_INVALID_STATE, b"no TX_BEGIN")
+            if tx["n"] == 0:  # streamed: as long as it came
+                tx["n"] = len(tx["data"]) // TX_BYTES[tx["mode"]]
             want = tx["n"] * TX_BYTES[tx["mode"]]
-            if len(tx["data"]) != want:
+            if len(tx["data"]) != want or not want:
                 return self.rsp(seq, ERR_INVALID_ARG, b"%d bytes, not %d" % (len(tx["data"]), want))
             restart = self.streaming
             self.stop()  # half duplex
@@ -278,6 +281,7 @@ def main():
     ap.add_argument("--gap-every", type=int, default=40, help="a loss every this many frames (0: none)")
     ap.add_argument("--serial", default="FAKE0001", help="the serial HELLO and discovery give")
     ap.add_argument("--tx-dump", help="write each transmission here (its mode byte, then its samples)")
+    ap.add_argument("--no-tx-stream", action="store_true", help="as a bridge before streamed transmissions")
     args = ap.parse_args()
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

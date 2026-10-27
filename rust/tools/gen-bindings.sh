@@ -41,4 +41,5 @@ bindgen "$tmp/linux.h" --allowlist-function lr20xx_hal_linux_open --allowlist-ty
     -- -I"$inc" -std=c11 >"$tmp/l.rs"
 { printf '%s' "$hdr"; cat "$tmp/b.rs"; } >"$out/bindings.rs"
 { printf '%s' "$hdr"; cat "$tmp/l.rs"; } >"$out/bindings_linux.rs"
+rustfmt --edition 2021 --config-path "$here/rustfmt.toml" "$out/bindings.rs" "$out/bindings_linux.rs"
 echo "wrote $out/bindings.rs, $out/bindings_linux.rs"

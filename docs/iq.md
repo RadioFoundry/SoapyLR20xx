@@ -455,6 +455,12 @@ Measured on a W12 (ROM 1.24) on 2026-10-24 with the driver's packet API (`lr20xx
   125 kS/s. The rest is the chip: TX_DONE comes about 66 µs after the run's length counted from SetTx sent, and a
   PA ramp of 4 µs instead of 32 µs didn't shorten the seam. SetTx sent during a run answers CMD_FAIL and changes
   nothing: the run ends at its length.
+- **R3.46** Streamed bursts (W12, ROM 1.24, 2026-10-26): the bridge keys up once it has 0.2 s of samples and takes
+  the rest into a ring as the burst goes out. A run whose data ends partway is cut with SetStandby once the TX FIFO
+  reads empty, in place of zeros to the run's end: a 2 s burst at 96 kS/s measured 2.001 s on air. A 20 s burst at
+  125 kS/s (5 MB, over twice the 2 MB ring) went out over USB with the FIFO never empty; key-up came 71 ms after the
+  first TX_DATA (whole-burst buffering: about 1.5 s for 5 s). Refills held back near a run's end (R3.45) only while
+  the run's last byte is already in the FIFO: a run that still needs bytes can't end, and holding them stalls it.
 ## 4. Not known
 
 - The meaning of the route payload's other bytes, and of sources other than the one used (byte 5 = 0x0A).

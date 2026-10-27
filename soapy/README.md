@@ -67,10 +67,13 @@ noise alone from about 28 dB, and under the AGC (R2.33), which logs a warning in
 
 ## Transmit
 
-Half duplex, by bursts: `writeStream` buffers until `SOAPY_SDR_END_BURST`, then the burst is converted and sent
-whole (the receiver pauses for it); `readStreamStatus` gives `SOAPY_SDR_END_BURST` when it has gone out,
-`SOAPY_SDR_UNDERFLOW` if the chip's FIFO ran dry (R3.13), `SOAPY_SDR_TIMEOUT`. A burst longer than the device
-buffers (HELLO's `tx_max_samples`) is refused.
+Half duplex, by bursts ending in `SOAPY_SDR_END_BURST` (the receiver pauses for each). Each `writeStream` is
+converted and sent as it comes: the bridge keys up once it has 0.2 s of samples (71 ms after the first over USB at
+125 kS/s), and a burst can be any length, `writeStream` blocking while the bridge's buffer is full. The
+`writeStream` with `SOAPY_SDR_END_BURST` returns once the burst has gone out; `readStreamStatus` then gives
+`SOAPY_SDR_END_BURST`, `SOAPY_SDR_UNDERFLOW` if the chip's FIFO ran dry (R3.13: write faster than the rate), or
+`SOAPY_SDR_TIMEOUT`. A bridge from before streamed transmissions gets the burst whole at the end, and refuses one
+longer than it buffers (HELLO's `tx_max_samples`).
 
 | `tx_mode` | Sent | |
 |---|---|---|

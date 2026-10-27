@@ -45,7 +45,8 @@ TONE = 10000.0
 dump = tempfile.NamedTemporaryFile(delete=False, suffix=".tx")
 dump.close()
 bridge = subprocess.Popen([sys.executable, args.bridge, "--port", "0", "--tone", str(TONE), "--gap-every", "20",
-                           "--tx-dump", dump.name], stdout=subprocess.PIPE, text=True)
+                           "--tx-dump", dump.name] + os.environ.get("LR20XX_FAKE_ARGS", "").split(),
+                          stdout=subprocess.PIPE, text=True)
 try:
     port = int(bridge.stdout.readline().split()[-1])
     host = "127.0.0.1:%d" % port
@@ -156,6 +157,37 @@ try:
     # 1 kHz at 2048 / 64 = 32 Hz a count: 31 counts
     counts = [b - 256 if b > 127 else b for b in d[1:]]
     check(all(abs(c - 31) <= 1 for c in counts[1:]), "FREQ samples %s" % counts[:5])
+
+    # a streamed burst: written in parts, it must go out as the same burst written whole, in each mode (iq_polar's
+    # dips under rmin cross the parts' edges)
+    def burst(mode, parts):
+        sdr.writeSetting("tx_mode", mode)
+        tx = sdr.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CF32)
+        sdr.activateStream(tx)
+        n = 9000
+        w = 2 * math.pi * 1000 / 48000
+        x = [cmath.rect(0.5 * (1 + math.cos(2 * math.pi * k / 700)), w * k) for k in range(n)]
+        cuts = [0] + [n * i // parts + 37 * i for i in range(1, parts)] + [n]
+        for i in range(parts):
+            part = x[cuts[i]:cuts[i + 1]]
+            b = array.array("f", [v for z in part for v in (z.real, z.imag)])
+            r = sdr.writeStream(tx, [b], len(part), SOAPY_SDR_END_BURST if i == parts - 1 else 0, timeoutUs=1000000)
+            check(r.ret == len(part), "%s part %d: writeStream %d" % (mode, i, r.ret))
+        st = sdr.readStreamStatus(tx, timeoutUs=3000000)
+        check(st.ret == 0 and st.flags & SOAPY_SDR_END_BURST, "%s in %d parts: done %d %d" % (mode, parts, st.ret,
+                                                                                            st.flags))
+        sdr.deactivateStream(tx)
+        sdr.closeStream(tx)
+        with open(dump.name, "rb") as fh:
+            return fh.read()
+
+    for mode in ("iq_polar", "iq_phase", "freq", "phase_step"):
+        whole, parts = burst(mode, 1), burst(mode, 7)
+        check(len(whole) > 9000 and whole == parts, "%s: written in 7 parts as written whole (%d, %d bytes, first "
+              "difference at %s)" % (mode, len(whole), len(parts),
+                                     next((i for i in range(min(len(whole), len(parts))) if whole[i] != parts[i]),
+                                          None)))
+    sdr.writeSetting("tx_mode", "freq")
     del sdr
 finally:
     bridge.terminate()

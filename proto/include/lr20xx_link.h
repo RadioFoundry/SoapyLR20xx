@@ -78,6 +78,7 @@ typedef struct {
 #define LR20XX_LINK_CAP_RX 0x01
 #define LR20XX_LINK_CAP_TX 0x02
 #define LR20XX_LINK_CAP_IRQ 0x04
+#define LR20XX_LINK_CAP_TX_STREAM 0x08 /* TX_BEGIN with 0 samples streams until TX_COMMIT; any length */
 
 typedef struct {
     double rate;

@@ -90,9 +90,11 @@ int lr20xx_irq_pin(lr20xx_t *dev);
 
 /* ── Transmit (lr20xx_tx.h sets a mode up; docs/iq.md section 3) ── */
 
-/* Where lr20xx_tx_stream gets its FIFO bytes: up to max into buf, the count back; 0 when there are no more. The
- * total must be a whole number of runs (run_bytes each): pad the last one. */
+/* Where lr20xx_tx_stream gets its FIFO bytes: up to max into buf, the count back; 0 when there are no more;
+ * LR20XX_TX_PULL_WAIT when there are none yet (a stream fed as it goes: asked again shortly). The total must be a
+ * whole number of runs (run_bytes each), the last one padded, unless cfg.cut_end. */
 typedef size_t (*lr20xx_tx_pull_t)(void *ctx, uint8_t *buf, size_t max);
+#define LR20XX_TX_PULL_WAIT ((size_t)-1)
 
 typedef struct {
     const uint8_t *start;   /* lr20xx_tx_start_frame's frame */
@@ -107,6 +109,9 @@ typedef struct {
     size_t buf_len;
     bool irq_pin;           /* the IRQ pin carries TX_DONE and TIMEOUT (SetDioIrqConfig, the caller's): watched instead
                              * of reading the IRQs, and the next run started the moment it rises (needs bytes_per_s) */
+    bool cut_end;           /* the data may end inside a run: that run is cut (SetStandby) once the FIFO is empty,
+                             * not padded out */
+    const volatile bool *stop; /* set: SetStandby at once, the rest dropped (NULL: none) */
 } lr20xx_tx_stream_cfg_t;
 
 typedef struct {
@@ -120,6 +125,10 @@ typedef struct {
     uint32_t restart_us;    /* the longest from a TX_DONE seen to the next run's SetTx sent */
     uint32_t gap_us;        /* the longest between two looks at the chip: what the FIFO has to cover */
     int done_level;         /* the fewest bytes in the FIFO at a TX_DONE between runs (-1: none) */
+    unsigned starved;       /* level reads that found the FIFO empty while the data hadn't ended: the pull fell
+                             * behind (the chip held its last sample, R3.13) */
+    bool cut;               /* the last run was cut when its data ran out (cfg.cut_end) */
+    bool stopped;           /* cfg.stop ended it */
 } lr20xx_tx_stream_stats_t;
 
 /* Clear the TX FIFO, prefill it from pull, key up with cfg.start, keep the FIFO topped up, and on each TX_DONE send

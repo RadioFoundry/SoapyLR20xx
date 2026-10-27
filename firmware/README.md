@@ -123,7 +123,7 @@ restarts into the ROM's download mode, so `idf.py flash` works without the BOOT 
 ## Transports
 
 - **TCP:** port 7373 (`LR20XX_LINK_TCP_PORT`), one host at a time. A new connection replaces the old one. When a
-  host goes away, receiving stops and any buffered transmission is dropped.
+  host goes away, receiving stops and any transmission under way is stopped.
 - **Discovery:** UDP port 7374 (`LR20XX_LINK_DISCOVERY_PORT`). A datagram starting with `LR20XX?` gets an answer
   sent back to its source address and port: one link frame, an `RSP` with sequence 0 and error 0, carrying the
   `HELLO` answer (`lr20xx_link_put_hello`, 106 bytes). That's 116 bytes in all. It's answered with either link.

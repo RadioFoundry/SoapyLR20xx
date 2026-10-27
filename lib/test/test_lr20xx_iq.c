@@ -533,6 +533,68 @@ static void transmit_pin(void)
     lr20xx_close(d);
 }
 
+/* A source fed as it goes: bytes arrive at the rate in 256-byte blocks, 768 ahead (under a FIFO), else
+ * LR20XX_TX_PULL_WAIT */
+static struct {
+    int64_t t0;
+    size_t total, given, waits, stop_after;
+    double bpus;
+    volatile bool stop;
+} SRC;
+static size_t pull_streamed(void *ctx, uint8_t *buf, size_t max)
+{
+    (void)ctx;
+    if (SRC.given >= SRC.total)
+        return 0;
+    if (SRC.stop_after && SRC.given >= SRC.stop_after)
+        SRC.stop = true;
+    double come = 768 + (double)(F.now_us - SRC.t0) * SRC.bpus;
+    size_t have = come >= (double)SRC.total ? SRC.total : (size_t)come / 256 * 256;
+    if (have <= SRC.given) {
+        SRC.waits++;
+        return LR20XX_TX_PULL_WAIT;
+    }
+    size_t n = have - SRC.given < max ? have - SRC.given : max;
+    memset(buf, 7, n);
+    SRC.given += n;
+    return n;
+}
+
+static void transmit_streamed(void)
+{
+    lr20xx_iq_t iq;
+    lr20xx_t *d = chip(true);
+    lr20xx_iq_init(&iq, d, &lr20xx_board_w12, false);
+    M.n_ops = 0;
+    memset(&SRC, 0, sizeof SRC);
+    SRC.t0 = F.now_us;
+    SRC.total = 150000; /* two runs of 65 534 bytes and part of a third */
+    SRC.bpus = 96000 * 2 / 1e6;
+    lr20xx_iq_tx_t tx = {.mode = LR20XX_TX_IQ_POLAR, .rate = 96000, .center_hz = 915e6, .power_dbm = 0,
+                         .streamed = true};
+    lr20xx_tx_stream_stats_t st;
+    lr20xx_err_t e = lr20xx_iq_transmit(&iq, &tx, pull_streamed, NULL, &st);
+    CHECK(e == LR20XX_OK && st.sent == 150000 && st.runs == 2 && st.cut && !st.early && !st.timed_out,
+          "streamed: 150 000 bytes, two runs and a cut third (%d, %s, %zu bytes, %d runs, cut %d)", e, iq.error, st.sent,
+          st.runs, st.cut);
+    CHECK(SRC.waits > 0 && st.starved == 0 && M.tx_level == 0 && !M.tx,
+          "the pull waited %zu times, never starved (%u), the FIFO empty at the cut (%d left)", SRC.waits, st.starved,
+          M.tx_level);
+
+    /* stopped part way */
+    M.n_ops = 0;
+    memset(&SRC, 0, sizeof SRC);
+    SRC.t0 = F.now_us;
+    SRC.total = 1000000;
+    SRC.stop_after = 100000;
+    SRC.bpus = 96000 * 2 / 1e6;
+    tx.stop = &SRC.stop;
+    e = lr20xx_iq_transmit(&iq, &tx, pull_streamed, NULL, &st);
+    CHECK(e == LR20XX_OK && st.stopped && st.sent < 110000 && find_op(LR20XX_SET_STANDBY, 0) >= 0,
+          "stopped: ends at once (%d, %zu bytes)", e, st.sent);
+    lr20xx_close(d);
+}
+
 static void transmit_front_end(void)
 {
     lr20xx_iq_t iq;
@@ -571,6 +633,7 @@ int main(void)
     stream(LR20XX_IQ_CONV8, 384000, true, "CONV8 384 k, IRQ");
     transmit();
     transmit_pin();
+    transmit_streamed();
     transmit_front_end();
     printf("lr20xx iq: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;

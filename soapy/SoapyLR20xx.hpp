@@ -71,6 +71,24 @@ public:
     /* The samples rx_start started. */
     virtual ChunkQueue &queue() = 0;
     virtual lr20xx_link_tx_result_t transmit(const lr20xx_link_tx_begin_t &b, const std::vector<uint8_t> &data) = 0;
+    /* A transmission in parts: tx_begin (b.samples 0: not known yet), tx_data as the samples come, then tx_commit
+     * (the result, once it has gone out) or tx_abort. By default the parts are gathered and sent whole with
+     * transmit(); a bridge that streams (LR20XX_LINK_CAP_TX_STREAM) takes them as they come. */
+    virtual void tx_begin(const lr20xx_link_tx_begin_t &b)
+    {
+        tx_b_ = b;
+        tx_d_.clear();
+    }
+    virtual void tx_data(const uint8_t *p, size_t n) { tx_d_.insert(tx_d_.end(), p, p + n); }
+    virtual lr20xx_link_tx_result_t tx_commit()
+    {
+        lr20xx_link_tx_begin_t b = tx_b_;
+        b.samples = tx_d_.size() / (b.mode == LR20XX_TX_FREQ || b.mode == LR20XX_TX_PHASE_STEP ? 1 : 2);
+        std::vector<uint8_t> d;
+        d.swap(tx_d_);
+        return transmit(b, d);
+    }
+    virtual void tx_abort() { tx_d_.clear(); }
     virtual std::vector<uint32_t> read_reg(uint32_t addr, int n) = 0;
     virtual void write_reg(uint32_t addr, uint32_t value) = 0;
     virtual float temperature() = 0;
@@ -79,6 +97,10 @@ public:
     virtual std::string failure() = 0;
     /* The local backend's allow_untested setting (re-checks the ROM); the link backend's device decides. */
     virtual void allow_untested(bool) {}
+
+protected:
+    lr20xx_link_tx_begin_t tx_b_{};
+    std::vector<uint8_t> tx_d_;
 };
 
 /* A bridge over TCP ("host[:port]") or a serial port. */
@@ -178,7 +200,8 @@ private:
     struct TxStream;
 
     void configure_rx(); /* RX_CONFIG with the current settings */
-    void send_tx(TxStream &t);
+    void tx_flush(TxStream &t, bool end); /* the samples so far, converted and sent */
+    void tx_finish(TxStream &t);          /* the burst's end: its outcome queued for readStreamStatus */
 
     std::unique_ptr<Backend> b_;
     lr20xx_link_hello_t hello_{};

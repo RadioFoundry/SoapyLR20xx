@@ -55,6 +55,13 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
 
     bool pulled_all = false;
     size_t n = pull(ctx, buf, FIFO_BYTES);
+    for (int64_t t0 = lr20xx_now_us(); n == LR20XX_TX_PULL_WAIT; n = pull(ctx, buf, FIFO_BYTES)) {
+        if ((c->stop && *c->stop) || lr20xx_now_us() - t0 > 2000000) {
+            n = 0;
+            break;
+        }
+        lr20xx_sleep_us(500);
+    }
     if (n == 0) {
         e = LR20XX_ERR_INVALID_SIZE; /* nothing to send */
         goto out;
@@ -76,6 +83,7 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
     int level_was = (int)n; /* bytes in the FIFO at level_t */
     double write_us = 0.6;  /* a FIFO write's time a byte, measured as it goes (16 MHz SPI: about 0.5) */
     bool held = false;      /* refills wait for the next run: the FIFO lasts past this one's end */
+    int64_t retry_at = 0;   /* the pull had nothing yet: ask again from then */
     for (;;) {
         int64_t now = lr20xx_now_us();
         if (now - last > (int64_t)st->gap_us)
@@ -85,6 +93,32 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
             st->timed_out = true;
             e = LR20XX_ERR_TIMEOUT;
             break;
+        }
+        if (c->stop && *c->stop) {
+            st->stopped = true;
+            standby(d);
+            break;
+        }
+        /* the data ended inside this run: cut it once the FIFO is empty (cfg.cut_end), from 100 us before the
+         * reckoned moment, reading the level */
+        if (c->cut_end && pulled_all && st->sent < (size_t)(st->runs + 1) * c->run_bytes) {
+            const int64_t empty_at = bpus > 0 ? level_t + (int64_t)(level_was / bpus) : now;
+            if (empty_at - now > 130) {
+                lr20xx_sleep_us((uint32_t)(empty_at - now - 100));
+                continue;
+            }
+            uint16_t level = 0;
+            if ((e = lr20xx_tx_fifo_level(d, &level)) != LR20XX_OK)
+                break;
+            if (level == 0) {
+                standby(d);
+                st->cut = true;
+                st->end_us = lr20xx_now_us();
+                break;
+            }
+            level_was = level;
+            level_t = lr20xx_now_us();
+            continue;
         }
         /* a pin that never rose (a run that ends later than reckoned): look over SPI too */
         const bool overdue = pin && now - run_start > run_us + 2000;
@@ -151,7 +185,9 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
                 if (!pulled_all && level == 0 && st->sent <= (size_t)st->runs * c->run_bytes) {
                     /* every run's bytes taken and none pulled since (refills held near the end): any more? */
                     n = pull(ctx, buf, FIFO_BYTES);
-                    if (n == 0) {
+                    if (n == LR20XX_TX_PULL_WAIT) {
+                        n = 0; /* the data fell behind: the run starts on what comes */
+                    } else if (n == 0) {
                         pulled_all = true;
                     } else {
                         if ((e = lr20xx_write_tx_fifo(d, buf, n)) != LR20XX_OK)
@@ -186,17 +222,20 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
         if (reckoned < 0)
             reckoned = 0;
         int free_bytes = FIFO_BYTES - (int)reckoned;
-        if (!pulled_all && !held && (free_bytes >= chunk || bpus <= 0)) {
+        if (!pulled_all && !held && now >= retry_at && (free_bytes >= chunk || bpus <= 0)) {
             uint16_t level = 0;
             if ((e = lr20xx_tx_fifo_level(d, &level)) != LR20XX_OK)
                 break;
             level_was = level;
             level_t = lr20xx_now_us();
+            if (level == 0)
+                st->starved++;
             free_bytes = FIFO_BYTES - (int)level;
             int want = free_bytes;
-            if (pin) {
+            if (pin && st->sent >= (size_t)(st->runs + 1) * c->run_bytes) {
                 /* a write that would run past the run's end holds up the restart (1 KB is about 0.5 ms): near the
-                 * end, write what the run still needs and what fits before it, the rest after */
+                 * end, write what the run still needs and what fits before it, the rest after. (A run whose last
+                 * byte isn't in the FIFO yet can't end: no limit then.) */
                 const int64_t to_end = run_start + run_us - level_t;
                 const int fits = (int)((to_end - 100) / write_us);
                 const int needs = (int)((to_end + 1000) * bpus) - (int)level;
@@ -206,6 +245,10 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
             if (want >= chunk || (want > 0 && want < free_bytes && want >= 16)) {
                 want &= ~3;
                 n = pull(ctx, buf, (size_t)(want < free_bytes ? want : free_bytes));
+                if (n == LR20XX_TX_PULL_WAIT) {
+                    retry_at = lr20xx_now_us() + 200;
+                    continue;
+                }
                 if (n == 0) {
                     pulled_all = true;
                 } else {
@@ -230,6 +273,8 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
             continue;
         }
         int64_t wait = pulled_all || held ? INT64_MAX : (int64_t)((chunk - free_bytes) / bpus);
+        if (!pulled_all && !held && retry_at - now > wait) /* the pull had nothing: not before its retry */
+            wait = retry_at - now;
         const int64_t to_end = run_start + run_us - now - 150; /* from 150 us before the run's reckoned end */
         if (to_end < wait)
             wait = to_end;
@@ -243,6 +288,9 @@ out:;
     uint8_t rx = 0, tx = 0;
     lr20xx_fifo_flags_peek(d, &rx, &tx);
     st->tx_flags = tx;
+    if (st->cut)
+        st->tx_flags &= (uint8_t)~LR20XX_FIFO_UNDERFLOW; /* the cut's own: the FIFO ran out as it ended (starved
+                                                          * counts any before) */
     lr20xx_status_t s;
     if (e != LR20XX_OK && lr20xx_get_status(d, &s) == LR20XX_OK && s.mode == LR20XX_MODE_TX)
         standby(d);

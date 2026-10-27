@@ -147,6 +147,9 @@ pub struct lr20xx_tx_stream_cfg_t {
     pub poll_us: ::core::ffi::c_int,
     pub buf: *mut u8,
     pub buf_len: usize,
+    pub irq_pin: bool,
+    pub cut_end: bool,
+    pub stop: *const bool,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -162,6 +165,9 @@ pub struct lr20xx_tx_stream_stats_t {
     pub restart_us: u32,
     pub gap_us: u32,
     pub done_level: ::core::ffi::c_int,
+    pub starved: ::core::ffi::c_uint,
+    pub cut: bool,
+    pub stopped: bool,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -292,6 +298,9 @@ pub struct lr20xx_iq_t {
     pub cal_word: u16,
     pub carry_n: u8,
     pub since_flags: u32,
+    pub anchor_us: i64,
+    pub anchor_level: i32,
+    pub reckon_n: u8,
     pub stats: lr20xx_iq_stats_t,
     pub error: [::core::ffi::c_char; 128usize],
     pub buf: [u8; 1028usize],
@@ -307,6 +316,8 @@ pub struct lr20xx_iq_tx_t {
     pub power_dbm: f64,
     pub samples: u64,
     pub max_ms: ::core::ffi::c_int,
+    pub streamed: bool,
+    pub stop: *const bool,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -859,6 +870,7 @@ pub const LR20XX_LINK_DISCOVERY: &[u8; 8] = b"LR20XX?\0";
 pub const LR20XX_LINK_CAP_RX: u32 = 1;
 pub const LR20XX_LINK_CAP_TX: u32 = 2;
 pub const LR20XX_LINK_CAP_IRQ: u32 = 4;
+pub const LR20XX_LINK_CAP_TX_STREAM: u32 = 8;
 pub const LR20XX_LINK_RX_HDR: u32 = 19;
 pub const LR20XX_LINK_GAP: u32 = 1;
 pub const LR20XX_LINK_HELLO_SIZE: u32 = 106;
@@ -1400,6 +1412,7 @@ unsafe extern "C" {
     ) -> lr20xx_err_t;
     pub fn lr20xx_wait_irq(dev: *mut lr20xx_t, timeout_ms: ::core::ffi::c_int) -> bool;
     pub fn lr20xx_has_irq(dev: *const lr20xx_t) -> bool;
+    pub fn lr20xx_irq_pin(dev: *mut lr20xx_t) -> ::core::ffi::c_int;
     pub fn lr20xx_tx_stream(
         dev: *mut lr20xx_t,
         cfg: *const lr20xx_tx_stream_cfg_t,

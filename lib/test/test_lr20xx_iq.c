@@ -693,6 +693,19 @@ static void transmit_front_end(void)
     pull_n = 4800;
     e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
     CHECK(e == LR20XX_OK && st.late && st.runs == 0 && find_op(LR20XX_SET_TX, 0) < 0, "late: nothing sent (%d)", e);
+
+    /* stopped while it waits for its time: at once, nothing sent */
+    static volatile bool stop_now;
+    stop_now = true;
+    tx.stop = &stop_now;
+    tx.at_us = F.now_us + 60000000;
+    const int64_t t_stop = F.now_us;
+    M.n_ops = 0;
+    pull_n = 4800;
+    e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    CHECK(e == LR20XX_OK && st.stopped && find_op(LR20XX_SET_TX, 0) < 0 && F.now_us - t_stop < 100000,
+          "stopped in the wait: %d, %lld us", e, (long long)(F.now_us - t_stop));
+    tx.stop = NULL;
     lr20xx_close(d);
 }
 

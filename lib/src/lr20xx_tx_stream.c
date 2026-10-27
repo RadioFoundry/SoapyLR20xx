@@ -84,8 +84,17 @@ lr20xx_err_t lr20xx_tx_stream(lr20xx_t *d, const lr20xx_tx_stream_cfg_t *c, lr20
             lr20xx_write(d, f, lr20xx_cmd(f, LR20XX_CLEAR_TX_FIFO));
             goto out;
         }
-        for (; now < at; now = lr20xx_now_us())
-            lr20xx_sleep_us((uint32_t)(at - now >= 60 ? at - now - 30 : at - now > 25 ? 25 : at - now));
+        for (; now < at; now = lr20xx_now_us()) {
+            if (c->stop && *c->stop) { /* nothing sent yet */
+                st->stopped = true;
+                st->sent = 0;
+                lr20xx_write(d, f, lr20xx_cmd(f, LR20XX_CLEAR_TX_FIFO));
+                goto out;
+            }
+            /* a long wait in steps of at most 10 ms, to see stop */
+            const int64_t left = at - now;
+            lr20xx_sleep_us((uint32_t)(left >= 60 ? (left - 30 > 10000 ? 10000 : left - 30) : left > 25 ? 25 : left));
+        }
     }
     const int64_t sending = lr20xx_now_us();
     if ((e = send_frame(d, c->start, c->start_len)) != LR20XX_OK)

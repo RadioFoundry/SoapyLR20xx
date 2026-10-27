@@ -177,12 +177,16 @@ static void run_tx(void)
 {
     lock();
     memset(&B.job.stats, 0, sizeof B.job.stats);
+    B.job.e = LR20XX_OK;
     B.job.starved_since = 0;
     B.tx.streamed = true; /* the ring: data may lag (a known length ends where it ends, as streamed) */
     B.tx.stop = &B.job.stop;
     const int64_t t0 = esp_timer_get_time();
     B.job.start_lead_us = B.tx.at_us ? (int32_t)(B.tx.at_us - t0) : 0;
-    B.job.e = lr20xx_iq_transmit(&iq, &B.tx, tx_pull, NULL, &B.job.stats);
+    if (B.job.stop) /* cancelled before it began (a timed one, waiting): the receiver left alone */
+        B.job.stats.stopped = true;
+    else
+        B.job.e = lr20xx_iq_transmit(&iq, &B.tx, tx_pull, NULL, &B.job.stats);
     const lr20xx_tx_stream_stats_t *s = &B.job.stats;
     B.job.setup_us = s->ready_us ? (int32_t)(s->ready_us - t0) : -1;
     B.job.key_late_us = B.tx.at_us && s->key_us ? (int32_t)(s->key_us - B.tx.at_us) : 0;
@@ -205,12 +209,15 @@ static void reader_task(void *arg)
          * receiving goes on */
         const int64_t lead = B.job.pending && B.tx.at_us && lr20xx_iq_tx_calibrates(&iq, &B.tx) ? TX_LEAD_CALIB_US
                                                                                                  : TX_LEAD_US;
-        const int64_t until = B.job.pending && B.tx.at_us ? B.tx.at_us - lead - esp_timer_get_time() : 0;
+        /* stopped before its time (TX_ABORT, the host gone): at once, so it ends without waiting for the time */
+        const int64_t until =
+            B.job.pending && B.tx.at_us && !B.job.stop ? B.tx.at_us - lead - esp_timer_get_time() : 0;
         if (B.job.pending && until <= 0) {
             run_tx();
             continue;
         }
         if (!B.streaming) {
+            /* (a stop wakes it: tx_cancel notifies) */
             ulTaskNotifyTake(pdTRUE, until > 0 ? pdMS_TO_TICKS(until / 1000) : pdMS_TO_TICKS(100));
             continue;
         }
@@ -427,6 +434,7 @@ static void tx_cancel(void)
     B.tx_open = false;
     if (B.tx_started) {
         B.job.stop = true;
+        xTaskNotifyGive(B.reader); /* a timed one may be waiting for its time */
         xSemaphoreTake(B.job.done, portMAX_DELAY);
         B.tx_started = false;
     }

@@ -78,9 +78,12 @@ channel 11, receiving 125 kS/s int16 for 30-60 s:
 | first place | −45 dBm | 85 % delivered | 98-100 % |
 | moved toward the access point | −45 dBm | | about 25 %, stalls up to 2.9 s |
 | moved again | −52 dBm | 100 %, and 250 kS/s 99 % | about 5 % |
+| the same, 20 minutes on | −54 dBm | 250 kS/s 48 %; `speedtest` 0.24-0.44 MB/s | |
 
-The best-placed antenna gave the strongest signal and the worst link: likely too strong a signal (one receiver
-overloaded), though the runs were few. A-MPDUs helped in one place and broke the link in another, so they stay off.
+The best-placed antenna gave the strongest signal and, for a while, the worst link, which fits too strong a signal
+(one receiver overloaded); but the same place swung from 99 % to 48 % at 250 kS/s within 20 minutes, with three
+other networks on channel 11. Placement and the channel's traffic both count; the signal's strength alone doesn't
+say. A-MPDUs helped in one place and broke the link in another, so they stay off.
 A slow or stalled link can hold a command's answer behind seconds of samples already sent: the module waits 10 s for
 answers while receiving (3 s otherwise). If Wi-Fi delivers less than it should, move the board or its antenna before
 anything else, and compare with `GET /api/speedtest`.

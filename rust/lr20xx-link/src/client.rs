@@ -184,6 +184,10 @@ impl<S: Read + Write> Client<S> {
 
     /// One transmission: TX_BEGIN, the samples in TX_DATA frames, TX_COMMIT (which answers once it has gone out).
     /// `samples` is in the mode's FIFO format; `begin.samples` is set from its length.
+    ///
+    /// This client doesn't read while it writes: while receiving, the samples the bridge sends meanwhile wait in the
+    /// stream's buffers, and a bridge that can't send for 2 s drops the host. Stop receiving first for a burst whose
+    /// upload is long (over the stream's receive buffer at the receive rate), or read and write on separate threads.
     pub fn transmit(&mut self, begin: &TxBegin, samples: &[u8], bytes_per_sample: usize) -> Result<TxResult> {
         let mut b = *begin;
         b.samples = (samples.len() / bytes_per_sample.max(1)) as u64;

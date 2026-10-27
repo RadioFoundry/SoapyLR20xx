@@ -112,12 +112,13 @@ try:
     check(abs(f - TONE) < 200, "tone %.0f Hz, want %.0f" % (f, TONE))
     check(abs(abs(x[100]) - 2000 / 32768) < 0.01, "level %f" % abs(x[100]))
     # the timestamps rise by the samples between, jumping where samples were lost by about their time (the fake loses
-    # 509, 2.04 ms at 250 kS/s; the index doesn't count them, the device's clock does; its reads end 50-400 us late)
+    # 509, 2.04 ms at 250 kS/s; the index doesn't count them, the device's clock does; its reads end 50-400 us late,
+    # so each estimate is within that spread)
     ok = all(t1 > t0 + (n0 - 1) * 1e9 / rate for (t0, n0), (t1, _) in zip(times, times[1:]))
     check(ok, "timestamps rise (each read's first after the last's last)")
     steps = [t1 - t0 - n0 * 1e9 / rate for (t0, n0), (t1, _) in zip(times, times[1:])]
     jumps = [s for s in steps if s > 1e6]
-    check(len(jumps) >= 1 and all(1.8e6 < s < 2.3e6 for s in jumps), "the gaps' time in the timestamps (%s us)" %
+    check(len(jumps) >= 1 and all(1.6e6 < s < 2.5e6 for s in jumps), "the gaps' time in the timestamps (%s us)" %
           [round(s / 1000) for s in jumps])
     check(all(abs(s) < 1e9 / rate or s > 1e6 for s in steps), "no other jumps: %s" % [round(s) for s in steps if not (abs(s) < 1e9 / rate or s > 1e6)])
 

@@ -702,7 +702,7 @@ int bridge_status_json(char *buf, size_t n)
     int k = cpu_json(buf, n);
     if (k >= (int)n)
         return k;
-    return k + snprintf(buf + k, n - k,
+    k += snprintf(buf + k, n - k,
                     "\"chip\":\"%s\",\"rom\":\"%u.%u\",\"board\":\"%s\",\"receiving\":%s,\"rate\":%.1f,"
                     "\"center_hz\":%.0f,\"samples\":%" PRIu64 ",\"losses\":%" PRIu32 ",\"restarts\":%" PRIu32
                     ",\"errors\":%" PRIu32 ",\"link_drops\":%" PRIu32 ",\"ring_peak\":%" PRIu32,
@@ -710,4 +710,12 @@ int bridge_status_json(char *buf, size_t n)
                     B.streaming ? "true" : "false", B.streaming ? iq.plan.rate : 0.0,
                     B.streaming ? iq.cfg.center_hz : 0.0, s.samples, s.losses, s.restarts, s.errors, B.link_drops,
                     B.ring_peak);
+    if (k >= (int)n)
+        return k;
+    /* the last burst (lr20xx_tx_stream_stats_t): restart_us is the longest from a TX_DONE seen to the next SetTx */
+    const lr20xx_tx_stream_stats_t *t = &B.job.stats;
+    return k + snprintf(buf + k, n - k,
+                        ",\"tx\":{\"result\":%d,\"runs\":%d,\"refills\":%u,\"restart_us\":%" PRIu32
+                        ",\"gap_us\":%" PRIu32 ",\"done_level\":%d,\"flags\":%u}",
+                        (int)B.job.e, t->runs, t->refills, t->restart_us, t->gap_us, t->done_level, t->tx_flags);
 }

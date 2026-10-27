@@ -46,6 +46,9 @@ static struct {
     int n_ops;
     int resets_seen;
     int level_queries;     /* GetRxFifoLevel */
+    uint32_t dio_irqs;     /* SetDioIrqConfig's mask: the IRQ pin */
+    int64_t done_at;       /* the last TX_DONE */
+    int64_t seam_max;      /* the longest from a TX_DONE to the next SetTx */
     /* TX */
     bool tx;
     int tx_level, tx_run, tx_sent, tx_sb;
@@ -83,9 +86,10 @@ static void advance(void)
         if (M.tx_sent >= M.tx_run) {
             M.tx = false;
             M.irq |= TX_DONE;
+            M.done_at = now - (int64_t)(M.tx_carry / M.tx_bytes_per_us); /* when the last byte went */
         }
     }
-    F.irq_level = M.irq_high_at && M.rx && M.level >= M.irq_high_at;
+    F.irq_level = (M.irq_high_at && M.rx && M.level >= M.irq_high_at) || (M.irq & M.dio_irqs & ~0x3Fu);
 }
 
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
@@ -160,7 +164,7 @@ static void respond(int idx, const uint8_t *tx, size_t len, uint8_t *rx)
         M.pending_addr = (uint32_t)tx[2] << 16 | (uint32_t)tx[3] << 8 | tx[4];
         break;
     case LR20XX_SET_RX: M.rx = true; break;
-    case LR20XX_SET_STANDBY: M.rx = false; M.tx = false; break;
+    case LR20XX_SET_STANDBY: M.rx = false; M.tx = false; M.done_at = 0; break;
     case LR20XX_CLEAR_RX_FIFO: M.level = 0; break;
     case LR20XX_CLEAR_TX_FIFO: M.tx_level = 0; break;
     case LR20XX_CLEAR_FIFO_IRQ_FLAGS: M.rx_flags &= (uint8_t)~tx[2]; break;
@@ -171,7 +175,11 @@ static void respond(int idx, const uint8_t *tx, size_t len, uint8_t *rx)
         M.tx_run = ((tx[2] << 8 | tx[3]) * M.tx_sb) & 0xFFFF;
         M.tx_rate = (int)be32(tx + 4);
         break;
+    case LR20XX_SET_DIO_IRQ_CONFIG: M.dio_irqs = be32(tx + 3); break;
     case LR20XX_SET_TX:
+        if (M.done_at && F.now_us - M.done_at > M.seam_max)
+            M.seam_max = F.now_us - M.done_at;
+        M.done_at = 0;
         M.tx = true;
         M.tx_sent = 0;
         M.tx_bytes_per_us = M.tx_rate * M.tx_sb / 1e6;
@@ -485,6 +493,8 @@ static void transmit(void)
     raw = find_op(LR20XX_RAW_TX, 0);
     CHECK(e == LR20XX_OK && st.runs == 4 && (M.args[raw][0] << 8 | M.args[raw][1]) == 25000,
           "100 000 I/Q: four runs of 25 000 (%d, %d runs)", e, st.runs);
+    CHECK(M.seam_max > 0 && M.seam_max < 400, "no IRQ pin: a TX_DONE seen and the next run started within %lld us",
+          (long long)M.seam_max);
     CHECK(lr20xx_tx_max_run(LR20XX_TX_IQ_PHASE) == 32767 && lr20xx_tx_max_run(LR20XX_TX_FREQ) == 65535,
           "the run caps");
     tx.mode = LR20XX_TX_FREQ;
@@ -500,6 +510,29 @@ static void transmit(void)
 }
 
 /* A board with a front end on RF switch DIOs: held in TX between runs, its own table back after (R3.44) */
+/* With the IRQ pin: TX_DONE on the DIO, the next run started on its edge (R3.45). */
+static void transmit_pin(void)
+{
+    lr20xx_iq_t iq;
+    lr20xx_t *d = chip(true);
+    lr20xx_iq_init(&iq, d, &lr20xx_board_w12, false);
+    M.n_ops = 0;
+    pull_n = 200000;
+    lr20xx_iq_tx_t tx = {.mode = LR20XX_TX_IQ_POLAR, .rate = 96000, .center_hz = 915e6, .power_dbm = 0,
+                         .samples = 100000};
+    lr20xx_tx_stream_stats_t st;
+    lr20xx_err_t e = lr20xx_iq_transmit(&iq, &tx, pull, NULL, &st);
+    const int dio = find_op(LR20XX_SET_DIO_IRQ_CONFIG, 0);
+    CHECK(dio >= 0 && M.args[dio][0] == lr20xx_board_w12.irq_dio &&
+              be32(M.args[dio] + 1) == (LR20XX_IRQ_TX_DONE | LR20XX_IRQ_TIMEOUT),
+          "the IRQ DIO on TX_DONE and the timeout");
+    CHECK(e == LR20XX_OK && st.runs == 4 && st.sent == 200000 && !st.early && !st.timed_out,
+          "four runs by the pin (%d, %s, %d runs, %zu bytes)", e, iq.error, st.runs, st.sent);
+    CHECK(M.seam_max > 0 && M.seam_max < 40, "the next run's SetTx within %lld us of TX_DONE", (long long)M.seam_max);
+    CHECK(st.refills > 100 && st.tx_flags == 0, "fed throughout: %u refills, flags 0x%02x", st.refills, st.tx_flags);
+    lr20xx_close(d);
+}
+
 static void transmit_front_end(void)
 {
     lr20xx_iq_t iq;
@@ -537,6 +570,7 @@ int main(void)
     stream(LR20XX_IQ_FSK16, 250000, true, "FSK16 250 k, IRQ");
     stream(LR20XX_IQ_CONV8, 384000, true, "CONV8 384 k, IRQ");
     transmit();
+    transmit_pin();
     transmit_front_end();
     printf("lr20xx iq: %d checks, %d failures\n", checks, fails);
     return fails ? 1 : 0;

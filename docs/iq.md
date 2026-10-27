@@ -446,6 +446,15 @@ Measured on a W12 (ROM 1.24) on 2026-10-24 with the driver's packet API (`lr20xx
   passes the chip's output about 34 dB below its PA path (a 17.8 dB pad, then the PA's 30 dB), so the W12's antenna
   gets about the chip's power + 12 dB, up to about +27 dBm. Setting 0xF30800 bit 14 before SetTx didn't make a run
   continuous: TX_DONE still came at the run's length (W12, ROM 1.24, 2026-10-26).
+- **R3.45** Shorter seams (W12, ROM 1.24, 2026-10-26): most of R3.44's seam was the host. Its loop read the IRQs
+  and the FIFO level over SPI each time round (four frames, about 100 µs) and waited 100 µs between looks, and a
+  1 KB FIFO write (about 0.5 ms at 16 MHz) could hold up a restart. With TX_DONE and TIMEOUT on the IRQ DIO, the
+  pin watched from 150 µs before a run's reckoned end, SetTx sent on its edge before any status read, and no FIFO
+  write allowed to run past a run's end, SetTx goes out 28–33 µs after TX_DONE (114 restarts at 125 kS/s). On air
+  the seams are then 81–85 µs below −10 dB for iq_polar and 102–135 µs for iq_phase (was 290–424 µs), at 96 and
+  125 kS/s. The rest is the chip: TX_DONE comes about 66 µs after the run's length counted from SetTx sent, and a
+  PA ramp of 4 µs instead of 32 µs didn't shorten the seam. SetTx sent during a run answers CMD_FAIL and changes
+  nothing: the run ends at its length.
 ## 4. Not known
 
 - The meaning of the route payload's other bytes, and of sources other than the one used (byte 5 = 0x0A).

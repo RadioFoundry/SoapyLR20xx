@@ -266,6 +266,8 @@ bool lr20xx_wait_irq(lr20xx_t *d, int timeout_ms) { return d->hal.wait_irq && d-
 
 bool lr20xx_has_irq(const lr20xx_t *d) { return d->hal.wait_irq != NULL; }
 
+int lr20xx_irq_pin(lr20xx_t *d) { return d->hal.irq ? d->hal.irq(d->hal.ctx) : -1; }
+
 lr20xx_err_t lr20xx_open(const lr20xx_config_t *cfg, lr20xx_t **out)
 {
     const lr20xx_hal_t *h = &cfg->hal;

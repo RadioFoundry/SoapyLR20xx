@@ -522,6 +522,12 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
         e = cmd(iq, f, lr20xx_cmd_clear_fifo_flags(f, 0, 0x3F));
     if (e == LR20XX_OK)
         e = cmd(iq, f, lr20xx_cmd_clear_irq(f, LR20XX_IRQ_TX_DONE | LR20XX_IRQ_TIMEOUT));
+    /* the IRQ pin on TX_DONE and the timeout alone, for the restarts (R3.45; a receive session sets it back) */
+    const bool pin = use_irq(iq) && tx->mode != LR20XX_TX_CW;
+    if (e == LR20XX_OK && pin) {
+        cmd(iq, f, lr20xx_cmd_set_dio_function(f, (uint8_t)iq->board->irq_dio, LR20XX_DIO_IRQ, 0));
+        e = cmd(iq, f, lr20xx_cmd_set_dio_irq(f, (uint8_t)iq->board->irq_dio, LR20XX_IRQ_TX_DONE | LR20XX_IRQ_TIMEOUT));
+    }
     if (e != LR20XX_OK) {
         failed(iq, "transmit setup", e);
     } else {
@@ -536,6 +542,7 @@ lr20xx_err_t lr20xx_iq_transmit(lr20xx_iq_t *iq, const lr20xx_iq_tx_t *tx, lr20x
             .run_bytes = tx->mode == LR20XX_TX_CW ? 0 : (uint32_t)pad.run_bytes,
             .bytes_per_s = tx->rate * (uint32_t)sb,
             .max_ms = tx->max_ms > 0 ? tx->max_ms : total_ms ? (int)(total_ms + 2000) : 10000,
+            .irq_pin = pin,
         };
         rf_hold_tx(iq, hz, true);
         e = lr20xx_tx_stream(iq->dev, &c, pad_pull, &pad, stats);

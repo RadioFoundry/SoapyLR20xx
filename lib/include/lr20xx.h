@@ -85,6 +85,8 @@ lr20xx_err_t lr20xx_set_clock(lr20xx_t *dev, int hz, int input_delay_ns);
 bool lr20xx_wait_irq(lr20xx_t *dev, int timeout_ms);
 /* Whether the HAL has an IRQ pin. */
 bool lr20xx_has_irq(const lr20xx_t *dev);
+/* The IRQ pin's level now (1 or 0), -1 with no pin: a GPIO read, no SPI. */
+int lr20xx_irq_pin(lr20xx_t *dev);
 
 /* ── Transmit (lr20xx_tx.h sets a mode up; docs/iq.md section 3) ── */
 
@@ -103,6 +105,8 @@ typedef struct {
     int poll_us;            /* the wait between polls with nothing to do (0: 100) */
     uint8_t *buf;           /* a buffer of at least 1020 bytes for the pull (NULL: allocated for the call) */
     size_t buf_len;
+    bool irq_pin;           /* the IRQ pin carries TX_DONE and TIMEOUT (SetDioIrqConfig, the caller's): watched instead
+                             * of reading the IRQs, and the next run started the moment it rises (needs bytes_per_s) */
 } lr20xx_tx_stream_cfg_t;
 
 typedef struct {
@@ -119,9 +123,9 @@ typedef struct {
 } lr20xx_tx_stream_stats_t;
 
 /* Clear the TX FIFO, prefill it from pull, key up with cfg.start, keep the FIFO topped up, and on each TX_DONE send
- * cfg.start again until the data ends (back-to-back runs: a seam of 0.2-0.5 ms at -21 to -25 dB, R3.15). The mode
- * must be set up first (lr20xx_tx_frames). Runs in the calling thread, polling: give it a priority that keeps the
- * FIFO fed. LR20XX_ERR_INVALID_RESPONSE with stats.early for R3.17's early end; LR20XX_ERR_TIMEOUT past max_ms or on
+ * cfg.start again until the data ends (back-to-back runs: a seam between them, R3.15, R3.44, R3.45). The mode must
+ * be set up first (lr20xx_tx_frames). Runs in the calling thread, sleeping between refills (lr20xx_sleep_us): give
+ * it a priority that keeps the FIFO fed. LR20XX_ERR_INVALID_RESPONSE with stats.early for R3.17's early end; LR20XX_ERR_TIMEOUT past max_ms or on
  * the chip's own timeout. On an error the chip is put in standby if it's still in TX. */
 lr20xx_err_t lr20xx_tx_stream(lr20xx_t *dev, const lr20xx_tx_stream_cfg_t *cfg, lr20xx_tx_pull_t pull, void *ctx,
                               lr20xx_tx_stream_stats_t *stats);

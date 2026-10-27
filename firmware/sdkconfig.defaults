@@ -34,3 +34,6 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 # FreeRTOS run-time stats: the status line gives the reader's share of core 0
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
+# lr20xx_sleep_us's timer wakes the reader from its interrupt, not through esp_timer's task (under Wi-Fi's)
+CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD=y

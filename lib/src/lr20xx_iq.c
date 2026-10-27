@@ -19,9 +19,14 @@
 #define IRQ_LEVEL_LORA 768
 #define IRQ_LEVEL_CONV8 512
 #define IRQ_LEVEL_FSK16 256
-/* Without the IRQ pin: wait below a quarter of the FIFO (waiting only for an empty FIFO never waited, and the
- * gateway's reader starved its core) */
-#define POLL_LEVEL 256
+/* By the level: wait for about 640 bytes and read them in one frame. Each read costs about 90 us besides its bytes
+ * (a level query, BUSY, the DMA's set-up): reading whatever had come in, 300-400 bytes at a time, kept the SPI busy
+ * 93% of the time at 576 k (R2.29, R2.34) and the reader on the CPU half of it. Between real level queries (every
+ * RECKON_READS reads) the level is reckoned from the rate, less a margin: a read past the level would underflow
+ * (R2.14). Waiting only for an empty FIFO never waited, and the gateway's reader starved its core. */
+#define READ_TARGET 640
+#define RECKON_READS 4
+#define RECKON_MARGIN 64
 #define LOSS (LR20XX_FIFO_OVERFLOW | LR20XX_FIFO_UNDERFLOW) /* R2.14 */
 
 static lr20xx_err_t failed(lr20xx_iq_t *iq, const char *what, lr20xx_err_t e)
@@ -226,6 +231,7 @@ static lr20xx_err_t session_start(lr20xx_iq_t *iq, bool quick)
     iq->carry_n = 0;
     iq->since_flags = 0;
     iq->by_level = true; /* what's in the FIFO first, then the IRQ */
+    iq->reckon_n = 0;
     iq->in_session = true;
     return LR20XX_OK;
 }
@@ -285,6 +291,7 @@ static lr20xx_err_t lost(lr20xx_iq_t *iq)
 {
     iq->stats.losses++;
     iq->gap = true;
+    iq->reckon_n = 0;
     if (iq->plan.mode != LR20XX_IQ_LORA) {
         uint8_t f[6];
         cmd(iq, f, lr20xx_cmd(f, LR20XX_CLEAR_RX_FIFO));
@@ -320,7 +327,12 @@ static int drain(lr20xx_iq_t *iq, size_t n, bool then_rearm, lr20xx_iq_sink_t si
     lr20xx_err_t e = lr20xx_read_fifo(iq->dev, iq->buf + c, n);
     if (e != LR20XX_OK) {
         iq->stats.errors++;
+        iq->reckon_n = 0;
         return -1;
+    }
+    if (iq->reckon_n) {
+        iq->reckon_n++;
+        iq->anchor_level -= (int32_t)n;
     }
     const int64_t t = lr20xx_now_us();
     uint8_t rx = 0, tx = 0;
@@ -371,21 +383,49 @@ int lr20xx_iq_poll(lr20xx_iq_t *iq, lr20xx_iq_sink_t sink, void *ctx, int wait_m
             iq->by_level = true;
         return got < 0 ? 0 : got;
     }
-    uint16_t level = 0;
-    lr20xx_err_t e = lr20xx_rx_fifo_level(iq->dev, &level);
-    if (e != LR20XX_OK) {
-        iq->stats.errors++;
-        return 0;
+    const double bpus = iq->plan.rate * iq->plan.sample_bytes / 1e6; /* FIFO bytes a microsecond */
+    size_t backlog;
+    bool reckon = iq->reckon_n && iq->reckon_n <= RECKON_READS;
+    double est = 0;
+    if (reckon) {
+        est = iq->anchor_level + (double)(lr20xx_now_us() - iq->anchor_us) * bpus - RECKON_MARGIN;
+        /* only while it can't have filled: a late poll asks, so an overflow is caught before the read (R2.13) */
+        reckon = est < LR20XX_IQ_FIFO_BYTES - 3 * RECKON_MARGIN;
     }
-    if (level >= LR20XX_IQ_FIFO_BYTES) { /* it filled: samples are gone (R2.13) */
-        e = lost(iq);
-        return e == LR20XX_OK ? 0 : e;
+    if (reckon) {
+        backlog = est > 0 ? (size_t)est & ~3u : 0;
+    } else {
+        uint16_t level = 0;
+        lr20xx_err_t e = lr20xx_rx_fifo_level(iq->dev, &level);
+        if (e != LR20XX_OK) {
+            iq->stats.errors++;
+            iq->reckon_n = 0;
+            return 0;
+        }
+        if (level >= LR20XX_IQ_FIFO_BYTES) { /* it filled: samples are gone (R2.13) */
+            iq->reckon_n = 0;
+            e = lost(iq);
+            return e == LR20XX_OK ? 0 : e;
+        }
+        /* the level as of the query's end: the latest it can be from, so the reckoning never runs ahead of it */
+        iq->anchor_us = lr20xx_now_us();
+        iq->anchor_level = level;
+        iq->reckon_n = 1;
+        backlog = level & ~3u;
+        /* LORA with the IRQ: back to waiting for it once the FIFO is well under its level, so the level rising
+         * past it raises it (the SPI outruns the samples: each read leaves less behind) */
+        if (use_irq(iq) && iq->plan.mode == LR20XX_IQ_LORA && backlog < irq_level(iq) / 2) {
+            if (backlog)
+                drain(iq, backlog, false, sink, ctx);
+            rearm(iq);
+            iq->by_level = false;
+            iq->reckon_n = 0;
+            return 0;
+        }
     }
-    size_t backlog = level & ~3u;
-    if (!use_irq(iq) && backlog < POLL_LEVEL) {
-        /* the time the FIFO takes to reach POLL_LEVEL, at most wait_ms */
-        double bps = iq->plan.rate * iq->plan.sample_bytes;
-        double us = (POLL_LEVEL - backlog) / bps * 1e6;
+    if (backlog < READ_TARGET) {
+        /* the time the FIFO takes to reach READ_TARGET, at most wait_ms */
+        double us = (READ_TARGET - backlog) / bpus;
         if (us > wait_ms * 1000.0)
             us = wait_ms * 1000.0;
         if (us > 0)
@@ -394,13 +434,7 @@ int lr20xx_iq_poll(lr20xx_iq_t *iq, lr20xx_iq_sink_t sink, void *ctx, int wait_m
     }
     if (backlog > LR20XX_IQ_FIFO_BYTES)
         backlog = LR20XX_IQ_FIFO_BYTES;
-    int got = backlog ? drain(iq, backlog, false, sink, ctx) : 0;
-    /* with the IRQ: back to waiting for it once the FIFO is well under its level, so the level rising past it
-     * raises it (the SPI outruns the samples: each read leaves less behind) */
-    if (use_irq(iq) && got >= 0 && backlog < irq_level(iq) / 2) {
-        rearm(iq);
-        iq->by_level = false;
-    }
+    int got = drain(iq, backlog, false, sink, ctx);
     return got < 0 ? 0 : got;
 }
 

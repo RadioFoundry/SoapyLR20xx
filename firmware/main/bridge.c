@@ -669,10 +669,40 @@ int bridge_link_pump(bridge_link_t *l, int wait_ms)
     return send_frame(l, lr20xx_link_rx_data(l->out, sizeof l->out, &h, samples, n)) < 0 ? -1 : 1;
 }
 
+/* The CPU since the last call, in percent: each core idle, and the reader. */
+static int cpu_json(char *buf, size_t n)
+{
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    static int64_t t0;
+    static uint32_t idle0[configNUMBER_OF_CORES], reader0;
+    const int64_t now = esp_timer_get_time();
+    const double span = t0 ? (double)(now - t0) / 100.0 : 0;
+    int k = snprintf(buf, n, "\"cpu\":{");
+    for (int c = 0; c < configNUMBER_OF_CORES; c++) {
+        const uint32_t v = (uint32_t)ulTaskGetIdleRunTimeCounterForCore(c);
+        k += snprintf(buf + k, k < (int)n ? n - k : 0, "\"idle%d\":%.1f,", c, span ? (v - idle0[c]) / span : -1.0);
+        idle0[c] = v;
+    }
+    TaskStatus_t ts;
+    vTaskGetInfo(B.reader, &ts, pdFALSE, eRunning);
+    const uint32_t r = (uint32_t)ts.ulRunTimeCounter;
+    k += snprintf(buf + k, k < (int)n ? n - k : 0, "\"reader\":%.1f},", span ? (r - reader0) / span : -1.0);
+    reader0 = r;
+    t0 = now;
+    return k;
+#else
+    (void)buf, (void)n;
+    return 0;
+#endif
+}
+
 int bridge_status_json(char *buf, size_t n)
 {
     const lr20xx_iq_stats_t s = iq.stats;
-    return snprintf(buf, n,
+    int k = cpu_json(buf, n);
+    if (k >= (int)n)
+        return k;
+    return k + snprintf(buf + k, n - k,
                     "\"chip\":\"%s\",\"rom\":\"%u.%u\",\"board\":\"%s\",\"receiving\":%s,\"rate\":%.1f,"
                     "\"center_hz\":%.0f,\"samples\":%" PRIu64 ",\"losses\":%" PRIu32 ",\"restarts\":%" PRIu32
                     ",\"errors\":%" PRIu32 ",\"link_drops\":%" PRIu32 ",\"ring_peak\":%" PRIu32,

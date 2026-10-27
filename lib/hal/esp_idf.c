@@ -28,7 +28,7 @@ typedef struct {
     uint32_t bounces;          /* transfers whose rx the SPI driver had to bounce */
 } esp_hal_t;
 
-static lr20xx_err_t xfer(void *ctx, const uint8_t *tx, uint8_t *rx, size_t len, size_t rx_len)
+static IRAM_ATTR lr20xx_err_t xfer(void *ctx, const uint8_t *tx, uint8_t *rx, size_t len, size_t rx_len)
 {
     esp_hal_t *h = ctx;
     if (!h->spi)
@@ -48,7 +48,7 @@ static lr20xx_err_t xfer(void *ctx, const uint8_t *tx, uint8_t *rx, size_t len, 
     return e;
 }
 
-static int busy(void *ctx) { return gpio_get_level(((esp_hal_t *)ctx)->cfg.busy); }
+static IRAM_ATTR int busy(void *ctx) { return gpio_get_level(((esp_hal_t *)ctx)->cfg.busy); }
 
 static lr20xx_err_t nreset(void *ctx, int level) { return gpio_set_level(((esp_hal_t *)ctx)->cfg.nreset, level); }
 
@@ -60,7 +60,7 @@ static void IRAM_ATTR irq_isr(void *arg)
         portYIELD_FROM_ISR();
 }
 
-static bool wait_irq(void *ctx, int timeout_ms)
+static IRAM_ATTR bool wait_irq(void *ctx, int timeout_ms)
 {
     esp_hal_t *h = ctx;
     if (!h->irq_sem)
@@ -74,7 +74,7 @@ static bool wait_irq(void *ctx, int timeout_ms)
     return xSemaphoreTake(h->irq_sem, t) == pdTRUE || gpio_get_level(h->cfg.irq);
 }
 
-static int irq(void *ctx)
+static IRAM_ATTR int irq(void *ctx)
 {
     esp_hal_t *h = ctx;
     return h->cfg.irq >= 0 ? gpio_get_level(h->cfg.irq) : -1;

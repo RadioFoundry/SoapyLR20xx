@@ -45,6 +45,7 @@ static struct {
     uint8_t args[512][14];
     int n_ops;
     int resets_seen;
+    int level_queries;     /* GetRxFifoLevel */
     /* TX */
     bool tx;
     int tx_level, tx_run, tx_sent, tx_sb;
@@ -92,16 +93,20 @@ static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t
 static void respond(int idx, const uint8_t *tx, size_t len, uint8_t *rx)
 {
     (void)idx;
-    F.now_us += (int64_t)(len / 2); /* 16 MHz SPI: 0.5 us a byte */
-    advance();
     const uint16_t op = (uint16_t)(tx[0] << 8 | tx[1]);
+    /* 16 MHz SPI: 0.5 us a byte. A FIFO read takes its bytes as of the frame's start and the samples that come in
+     * during it after: it drains faster than they come (2 MB/s against at most 1.33), so the level only falls. */
+    if (op != LR20XX_READ_RX_FIFO || M.pending) {
+        F.now_us += (int64_t)(len / 2);
+        advance();
+    }
     rx[0] = ST_OK;
     if (op == 0 && M.pending) { /* a read's answer frame */
         rx[0] = ST_DATA;
         uint8_t *a = rx + 2;
         switch (M.pending) {
         case LR20XX_GET_VERSION: a[0] = M.ver[0]; a[1] = M.ver[1]; break;
-        case LR20XX_GET_RX_FIFO_LEVEL: a[0] = (uint8_t)(M.level >> 8); a[1] = (uint8_t)M.level; break;
+        case LR20XX_GET_RX_FIFO_LEVEL: M.level_queries++; a[0] = (uint8_t)(M.level >> 8); a[1] = (uint8_t)M.level; break;
         case LR20XX_GET_TX_FIFO_LEVEL: a[0] = (uint8_t)(M.tx_level >> 8); a[1] = (uint8_t)M.tx_level; break;
         case LR20XX_GET_FIFO_IRQ_FLAGS: a[0] = M.rx_flags; a[1] = 0; break;
         case LR20XX_GET_AND_CLEAR_FIFO_IRQ_FLAGS: a[0] = M.rx_flags; M.rx_flags = 0; break;
@@ -127,6 +132,8 @@ static void respond(int idx, const uint8_t *tx, size_t len, uint8_t *rx)
         M.level -= (int)real;
         if (real < n)
             M.rx_flags |= LR20XX_FIFO_UNDERFLOW;
+        F.now_us += (int64_t)(len / 2);
+        advance();
         return;
     }
     if (op == LR20XX_GET_STATUS) {
@@ -395,8 +402,15 @@ static void stream(lr20xx_iq_mode_t mode, double rate, bool irq, const char *wha
     CHECK(S.samples > want * 0.97 && S.samples <= want + 1024, "%s: %llu of about %.0f samples", what,
           (unsigned long long)S.samples, want);
     CHECK(iq.stats.samples == S.samples, "%s: counted", what);
-    if (irq)
+    if (irq && mode == LR20XX_IQ_LORA)
         CHECK(F.irq_waits > 10, "%s: waited on the IRQ (%d)", what, F.irq_waits);
+    if (mode != LR20XX_IQ_LORA) {
+        /* by the level: reads of about 640 bytes, the level asked before one read in four or fewer */
+        const double per_read = (double)iq.stats.samples * iq.plan.sample_bytes / iq.stats.reads;
+        const int asked = M.level_queries;
+        CHECK(per_read > 560 && asked * 3 < (int)iq.stats.reads, "%s: %.0f bytes a read, %d level queries for %u reads",
+              what, per_read, asked, iq.stats.reads);
+    }
 
     /* a stall: the FIFO overflows */
     S.calls = 0;

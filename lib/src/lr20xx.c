@@ -49,7 +49,8 @@ static lr20xx_err_t wait_busy(lr20xx_t *d)
         if (dt > 2000)
             lr20xx_sleep_tick();
         else
-            lr20xx_delay_us(5);
+            lr20xx_delay_us(dt > 50 ? 5 : 1); /* most commands hold BUSY a few us: 5 us steps added half of that
+                                                again to every frame, several thousand a second while receiving */
     }
 }
 

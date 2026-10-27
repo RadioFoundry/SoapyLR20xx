@@ -49,7 +49,7 @@ static const char *reset_name(esp_reset_reason_t r)
 
 static esp_err_t status_get(httpd_req_t *req)
 {
-    static char body[768];
+    static char body[1024];
     int n = snprintf(body, sizeof body, "{\"uptime_s\":%lld,\"reset\":\"%s\",\"firmware\":\"%s\",\"internal_free\":%u,",
                      (long long)(esp_timer_get_time() / 1000000), reset_name(esp_reset_reason()),
                      esp_app_get_description()->version, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));

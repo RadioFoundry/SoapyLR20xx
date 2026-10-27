@@ -11,6 +11,7 @@ if(ESP_PLATFORM)
     idf_component_register(
         SRCS ${LR20XX_PORTABLE_SRCS} ${LR20XX_DRIVER_SRCS} port/esp_idf.c hal/esp_idf.c
         INCLUDE_DIRS include
+        LDFRAGMENTS linker.lf
         PRIV_REQUIRES esp_driver_spi esp_driver_gpio esp_timer)
     return()
 endif()

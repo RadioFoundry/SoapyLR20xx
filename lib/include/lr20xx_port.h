@@ -39,8 +39,8 @@ void lr20xx_delay_us(uint32_t us);
 void lr20xx_sleep_tick(void);
 /* Sleep at least ms milliseconds. */
 void lr20xx_sleep_ms(int ms);
-/* Wait about us microseconds, giving the CPU up where the platform can for that long (POSIX: a sleep; FreeRTOS: a
- * tick if us is at least one, else a spin). */
+/* Wait about us microseconds, giving the CPU up where the platform can for that long (POSIX: a sleep; ESP-IDF:
+ * ticks when us is at least one, at most us, else a one-shot timer, or a spin under 30 us). */
 void lr20xx_sleep_us(uint32_t us);
 
 /* The length of lr20xx_sleep_tick, in ms. */

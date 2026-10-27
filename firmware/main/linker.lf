@@ -1,0 +1,11 @@
+# The bridge's sample path in IRAM: the reader's sink, the link task's pump and the links' sends.
+[mapping:bridge]
+archive: libmain.a
+entries:
+    bridge:sink (noflash)
+    bridge:bridge_link_pump (noflash)
+    bridge:send_frame (noflash)
+    link_tcp:tcp_send (noflash)
+    if LR20XX_USB_NCM = y:
+        link_ncm:ncm_transmit (noflash)
+        link_ncm:usb_tx (noflash)

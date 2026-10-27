@@ -113,14 +113,14 @@ static void busy_handshake(void)
     int64_t t0 = F.now_us;
     lr20xx_status_t st;
     CHECK(lr20xx_get_status(d, &st) == LR20XX_OK, "get_status after a short BUSY");
-    CHECK(F.now_us - t0 >= 1000 && F.now_us - t0 < 1100 && F.busy_polls > 100, "waited 1 ms in 5 us steps (%lld us, %d polls)",
+    CHECK(F.now_us - t0 >= 1000 && F.now_us - t0 < 1100 && F.busy_polls > 100, "waited 1 ms in 1 us, then 5 us steps (%lld us, %d polls)",
           (long long)(F.now_us - t0), F.busy_polls);
     // BUSY high for 30 ms: after 2 ms it sleeps a tick at a time
     F.busy_until_us = F.now_us + 30000;
     t0 = F.now_us;
     F.busy_polls = 0;
     CHECK(lr20xx_get_status(d, &st) == LR20XX_OK, "get_status after a long BUSY");
-    CHECK(F.now_us - t0 >= 30000 && F.now_us - t0 < 45000 && F.busy_polls < 420, "then a tick at a time (%lld us, %d polls)",
+    CHECK(F.now_us - t0 >= 30000 && F.now_us - t0 < 45000 && F.busy_polls < 470, "then a tick at a time (%lld us, %d polls)",
           (long long)(F.now_us - t0), F.busy_polls);
     CHECK(lr20xx_failures(d) == 0, "no failures");
     // wake: the frame goes out while BUSY is high, then it waits for BUSY to drop

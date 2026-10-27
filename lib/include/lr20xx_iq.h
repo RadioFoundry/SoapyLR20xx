@@ -108,6 +108,11 @@ typedef struct {
     uint16_t cal_word;         /* the CalibFE cell the session calibrated (0: none) */
     uint8_t carry_n;           /* bytes of a sample read and not yet delivered (0 or 2) */
     uint32_t since_flags;
+    /* the FIFO level reckoned from the rate between level queries: anchor_level bytes at anchor_us, less what's
+     * been read since; reckon_n the reads since the query plus one (0: no query yet) */
+    int64_t anchor_us;
+    int32_t anchor_level;
+    uint8_t reckon_n;
     lr20xx_iq_stats_t stats;
     char error[128];
     uint8_t buf[LR20XX_IQ_FIFO_BYTES + 4] __attribute__((aligned(4)));

@@ -199,6 +199,16 @@ Measured on a W12 with ROM 1.24, and read from the ROM's code (facts only; nothi
   about 10 KB of internal RAM free while streaming). Keep FIFO frames (2 status bytes + data) a multiple of 4 and
   the buffers aligned; checking the free size (a 2 KB margin) refused every read, and checking the largest free
   block on every transfer was too slow for the stream.
+- **R2.34** (W12, ESP32-S3 at 240 MHz, 16 MHz SPI, 2026-10-26) The reader's cost is per read, not per byte. Reading
+  by the level whatever had come in (300–400 bytes at a time) cost about 90 us a read besides the bytes: a level
+  query (two frames, 17.6 us each through ESP-IDF's polled transfer, about 3 us of it on the wire), BUSY (7–10 us
+  a frame) and the DMA read's set-up (about 40 us). At 576 k int8 that kept the SPI busy about 90% of the time and
+  the reader on core 0 42% of it (int16 250 k: 49%), and it never slept: the FIFO was always past the IRQ level.
+  Moving the reader's code into IRAM, and holding the SPI bus between transfers, changed neither. Waiting for about
+  640 bytes and querying the level only every fourth read, the level in between reckoned from the rate less a
+  64-byte margin, took it to 21% (576 k), 19% (250 k int16), 11% (125 k int16) and 6% (48 k), the SPI busy about
+  64% at 576 k. Over USB, 576 k and 250 k int16 delivered 100% for 60 s each with no loss. The wait between reads
+  needs a sleep under a tick: an esp_timer one-shot (ISR dispatch) waking the task.
 - **R2.27** The noise floor is set after the gain. On the W12 at 461 MHz (through the 902–928 MHz SAW), the noise
   doesn't move from step 1 to 13 (source 1, about 2 counts rms) while a bench carrier rises with the step: the
   floor there is the chip's own, after the gain. At 905, 915 and 925 MHz with the GC1109's LNA on, the noise rises

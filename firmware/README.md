@@ -13,8 +13,11 @@ rate streams without loss (below). Transmit and Wi-Fi streaming are not yet trie
 ## How it works
 
 - **Reader task:** on core 0 at priority 24, above Wi-Fi. Under Wi-Fi's priority, Wi-Fi traffic kept a reader off
-  the CPU past the FIFO's 2 ms. It reads the chip and puts each read into a message buffer in PSRAM: a header and
-  the samples. When that buffer is full, the read is dropped and the next one is flagged as a gap.
+  the CPU past the FIFO's 2 ms. It reads the chip about 640 bytes at a time, sleeping between reads on a timer
+  (`docs/iq.md` R2.34), and puts each read into a message buffer in PSRAM: a header and the samples. When that
+  buffer is full, the read is dropped and the next one is flagged as a gap. The reader's code, the SPI driver's
+  and the sample path's are in IRAM (`*/linker.lf`). `/api/status` gives each core's idle time and the reader's
+  share (`cpu`) since the last call.
 - **Link task:** on core 1. It handles the host's commands and sends the buffered reads as `RX_DATA` frames, with
   up to 4 KB of samples a frame.
 - **Shared chip:** commands and the reader take turns on one mutex. The reader gives a command a tick when one is

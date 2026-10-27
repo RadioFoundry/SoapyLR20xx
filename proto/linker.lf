@@ -1,0 +1,14 @@
+# Building and packing RX_DATA frames in IRAM (ESP-IDF): the link task runs them on every frame.
+[mapping:lr20xx_link]
+archive: libproto.a
+entries:
+    lr20xx_link:frame (noflash)
+    lr20xx_link:lr20xx_link_put_u16 (noflash)
+    lr20xx_link:lr20xx_link_put_u32 (noflash)
+    lr20xx_link:lr20xx_link_put_u64 (noflash)
+    lr20xx_link:lr20xx_link_put_rx_hdr (noflash)
+    lr20xx_link:lr20xx_link_get_rx_hdr (noflash)
+    lr20xx_link:lr20xx_link_rx_data (noflash)
+    lr20xx_link:value (noflash)
+    lr20xx_link:lr20xx_link_bits (noflash)
+    lr20xx_link:lr20xx_link_pack (noflash)
